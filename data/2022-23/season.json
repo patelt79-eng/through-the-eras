@@ -1,0 +1,623 @@
+{
+ "era": "2022/23",
+ "id": "2022-23",
+ "start": "2022-07-31",
+ "ageRef": "2022-08-05",
+ "loanUntil": "2023-05-31",
+ "nextSummerOpen": "06-10",
+ "rules": {
+  "subs": 5,
+  "bench": 9,
+  "awayGoals": false,
+  "points": 3
+ },
+ "competitions": [
+  {
+   "id": "PL",
+   "name": "Premier League",
+   "type": "league",
+   "zones": {
+    "ucl": 4,
+    "uel": 1,
+    "rel": 3
+   }
+  }
+ ],
+ "windows": [
+  {
+   "key": "summer",
+   "name": "Summer window",
+   "open": "2022-06-01",
+   "close": "2022-09-01",
+   "closeLabel": "closes 1 Sep, 23:00"
+  },
+  {
+   "key": "january",
+   "name": "January window",
+   "open": "2023-01-01",
+   "close": "2023-01-31",
+   "closeLabel": "closes 31 Jan"
+  }
+ ],
+ "handles": {
+  "wc": {
+   "name": "World Cup 2022",
+   "h": "@qatar2022",
+   "kind": "league"
+  }
+ },
+ "events": [
+  {
+   "d": "2022-11-13",
+   "posts": [
+    [
+     "wc",
+     "🏆 The World Cup in Qatar kicks off on 20 November. The Premier League pauses until Boxing Day.",
+     true
+    ]
+   ],
+   "msg": [
+    "board",
+    "World Cup break",
+    "The league is paused until 26 December while the World Cup is played in Qatar. Your internationals are away with their countries."
+   ]
+  },
+  {
+   "d": "2022-12-19",
+   "posts": [
+    [
+     "wc",
+     "🇦🇷 Argentina are world champions! They beat France on penalties after a 3–3 classic in the final. Messi finally lifts the trophy.",
+     true
+    ],
+    [
+     "wc",
+     "🇫🇷 Kylian Mbappé scores a hat-trick in the final and still finishes on the losing side. Golden Boot with 8 goals.",
+     false
+    ]
+   ]
+  }
+ ],
+ "sackings": [
+  {
+   "d": "2022-08-30",
+   "c": "BOU",
+   "out": "Scott Parker",
+   "inn": "Gary O'Neil",
+   "cond": "any"
+  },
+  {
+   "d": "2022-09-07",
+   "c": "CHE",
+   "out": "Thomas Tuchel",
+   "inn": "Graham Potter",
+   "cond": "board",
+   "fromC": "BHA"
+  },
+  {
+   "d": "2022-09-18",
+   "c": "BHA",
+   "out": "Graham Potter",
+   "inn": "Roberto De Zerbi",
+   "cond": "after",
+   "afterC": "CHE",
+   "afterMgr": "Graham Potter"
+  },
+  {
+   "d": "2022-10-24",
+   "c": "AVL",
+   "out": "Steven Gerrard",
+   "inn": "Unai Emery",
+   "cond": "poor"
+  },
+  {
+   "d": "2022-11-05",
+   "c": "WOL",
+   "out": "Bruno Lage",
+   "inn": "Julen Lopetegui",
+   "cond": "poor"
+  },
+  {
+   "d": "2022-11-07",
+   "c": "SOU",
+   "out": "Ralph Hasenhüttl",
+   "inn": "Nathan Jones",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-01-23",
+   "c": "EVE",
+   "out": "Frank Lampard",
+   "inn": "Sean Dyche",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-02-06",
+   "c": "LEE",
+   "out": "Jesse Marsch",
+   "inn": "Javi Gracia",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-02-12",
+   "c": "SOU",
+   "out": "Nathan Jones",
+   "inn": "Rubén Sellés",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-03-21",
+   "c": "CRY",
+   "out": "Patrick Vieira",
+   "inn": "Roy Hodgson",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-03-26",
+   "c": "TOT",
+   "out": "Antonio Conte",
+   "inn": "Cristian Stellini",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-04-02",
+   "c": "CHE",
+   "out": "Graham Potter",
+   "inn": "Frank Lampard",
+   "cond": "poor"
+  },
+  {
+   "d": "2023-04-10",
+   "c": "LEI",
+   "out": "Brendan Rodgers",
+   "inn": "Dean Smith",
+   "cond": "poor"
+  }
+ ],
+ "clubs": {
+  "ARS": {
+   "name": "Arsenal",
+   "col": "#EF0107",
+   "col2": "#FFFFFF",
+   "std": "Emirates Stadium",
+   "mgr": "Mikel Arteta",
+   "budget": 120,
+   "pres": 86,
+   "exp": "top4",
+   "wealth": 1.35,
+   "short": "Arsenal",
+   "rivals": [
+    "TOT",
+    "CHE"
+   ],
+   "league": "PL"
+  },
+  "AVL": {
+   "name": "Aston Villa",
+   "col": "#7A1D45",
+   "col2": "#95BFE5",
+   "std": "Villa Park",
+   "mgr": "Steven Gerrard",
+   "budget": 60,
+   "pres": 74,
+   "exp": "tophalf",
+   "wealth": 1,
+   "short": "Aston Villa",
+   "rivals": [
+    "WOL"
+   ],
+   "league": "PL"
+  },
+  "BOU": {
+   "name": "Bournemouth",
+   "col": "#DA291C",
+   "col2": "#111111",
+   "std": "Vitality Stadium",
+   "mgr": "Scott Parker",
+   "budget": 25,
+   "pres": 62,
+   "exp": "survive",
+   "wealth": 0.8,
+   "short": "Bournemouth",
+   "rivals": [
+    "SOU"
+   ],
+   "league": "PL"
+  },
+  "BRE": {
+   "name": "Brentford",
+   "col": "#E30613",
+   "col2": "#FFFFFF",
+   "std": "Gtech Community Stadium",
+   "mgr": "Thomas Frank",
+   "budget": 35,
+   "pres": 66,
+   "exp": "mid",
+   "wealth": 0.8,
+   "short": "Brentford",
+   "rivals": [],
+   "league": "PL"
+  },
+  "BHA": {
+   "name": "Brighton",
+   "col": "#0057B8",
+   "col2": "#FFFFFF",
+   "std": "Amex Stadium",
+   "mgr": "Graham Potter",
+   "budget": 50,
+   "pres": 70,
+   "exp": "tophalf",
+   "wealth": 0.9,
+   "short": "Brighton",
+   "rivals": [
+    "CRY"
+   ],
+   "league": "PL"
+  },
+  "CHE": {
+   "name": "Chelsea",
+   "col": "#034694",
+   "col2": "#FFFFFF",
+   "std": "Stamford Bridge",
+   "mgr": "Thomas Tuchel",
+   "budget": 250,
+   "pres": 90,
+   "exp": "top4",
+   "wealth": 1.45,
+   "short": "Chelsea",
+   "rivals": [
+    "TOT",
+    "ARS"
+   ],
+   "league": "PL"
+  },
+  "CRY": {
+   "name": "Crystal Palace",
+   "col": "#1B458F",
+   "col2": "#C4122E",
+   "std": "Selhurst Park",
+   "mgr": "Patrick Vieira",
+   "budget": 35,
+   "pres": 66,
+   "exp": "mid",
+   "wealth": 0.85,
+   "short": "Crystal Palace",
+   "rivals": [
+    "BHA"
+   ],
+   "league": "PL"
+  },
+  "EVE": {
+   "name": "Everton",
+   "col": "#003399",
+   "col2": "#FFFFFF",
+   "std": "Goodison Park",
+   "mgr": "Frank Lampard",
+   "budget": 50,
+   "pres": 72,
+   "exp": "mid",
+   "wealth": 1,
+   "short": "Everton",
+   "rivals": [
+    "LIV"
+   ],
+   "league": "PL"
+  },
+  "FUL": {
+   "name": "Fulham",
+   "col": "#E6E6E6",
+   "col2": "#111111",
+   "std": "Craven Cottage",
+   "mgr": "Marco Silva",
+   "budget": 40,
+   "pres": 63,
+   "exp": "survive",
+   "wealth": 0.8,
+   "short": "Fulham",
+   "rivals": [],
+   "league": "PL"
+  },
+  "LEE": {
+   "name": "Leeds United",
+   "col": "#F2F2F2",
+   "col2": "#1D428A",
+   "std": "Elland Road",
+   "mgr": "Jesse Marsch",
+   "budget": 50,
+   "pres": 68,
+   "exp": "survive",
+   "wealth": 0.85,
+   "short": "Leeds",
+   "rivals": [
+    "MUN"
+   ],
+   "league": "PL"
+  },
+  "LEI": {
+   "name": "Leicester City",
+   "col": "#003090",
+   "col2": "#FDBE11",
+   "std": "King Power Stadium",
+   "mgr": "Brendan Rodgers",
+   "budget": 30,
+   "pres": 74,
+   "exp": "tophalf",
+   "wealth": 1,
+   "short": "Leicester",
+   "rivals": [
+    "NFO"
+   ],
+   "league": "PL"
+  },
+  "LIV": {
+   "name": "Liverpool",
+   "col": "#C8102E",
+   "col2": "#F6EB61",
+   "std": "Anfield",
+   "mgr": "Jürgen Klopp",
+   "budget": 90,
+   "pres": 93,
+   "exp": "title",
+   "wealth": 1.4,
+   "short": "Liverpool",
+   "rivals": [
+    "MUN",
+    "EVE",
+    "MCI"
+   ],
+   "league": "PL"
+  },
+  "MCI": {
+   "name": "Manchester City",
+   "col": "#6CABDD",
+   "col2": "#1C2C5B",
+   "std": "Etihad Stadium",
+   "mgr": "Pep Guardiola",
+   "budget": 100,
+   "pres": 95,
+   "exp": "title",
+   "wealth": 1.5,
+   "short": "Man City",
+   "rivals": [
+    "MUN",
+    "LIV"
+   ],
+   "league": "PL"
+  },
+  "MUN": {
+   "name": "Manchester United",
+   "col": "#DA291C",
+   "col2": "#FBE122",
+   "std": "Old Trafford",
+   "mgr": "Erik ten Hag",
+   "budget": 150,
+   "pres": 90,
+   "exp": "top4",
+   "wealth": 1.45,
+   "short": "Man Utd",
+   "rivals": [
+    "LIV",
+    "MCI",
+    "LEE"
+   ],
+   "league": "PL"
+  },
+  "NEW": {
+   "name": "Newcastle United",
+   "col": "#241F20",
+   "col2": "#FFFFFF",
+   "std": "St James' Park",
+   "mgr": "Eddie Howe",
+   "budget": 100,
+   "pres": 76,
+   "exp": "tophalf",
+   "wealth": 1.1,
+   "short": "Newcastle",
+   "rivals": [],
+   "league": "PL"
+  },
+  "NFO": {
+   "name": "Nottingham Forest",
+   "col": "#DD0000",
+   "col2": "#FFFFFF",
+   "std": "City Ground",
+   "mgr": "Steve Cooper",
+   "budget": 120,
+   "pres": 64,
+   "exp": "survive",
+   "wealth": 0.85,
+   "short": "Nott'm Forest",
+   "rivals": [
+    "LEI"
+   ],
+   "league": "PL"
+  },
+  "SOU": {
+   "name": "Southampton",
+   "col": "#D71920",
+   "col2": "#FFFFFF",
+   "std": "St Mary's Stadium",
+   "mgr": "Ralph Hasenhüttl",
+   "budget": 40,
+   "pres": 64,
+   "exp": "survive",
+   "wealth": 0.8,
+   "short": "Southampton",
+   "rivals": [],
+   "league": "PL"
+  },
+  "TOT": {
+   "name": "Tottenham Hotspur",
+   "col": "#F4F4F4",
+   "col2": "#132257",
+   "std": "Tottenham Hotspur Stadium",
+   "mgr": "Antonio Conte",
+   "budget": 110,
+   "pres": 86,
+   "exp": "top4",
+   "wealth": 1.3,
+   "short": "Spurs",
+   "rivals": [
+    "ARS",
+    "CHE",
+    "WHU"
+   ],
+   "league": "PL"
+  },
+  "WHU": {
+   "name": "West Ham United",
+   "col": "#7A263A",
+   "col2": "#1BB1E7",
+   "std": "London Stadium",
+   "mgr": "David Moyes",
+   "budget": 90,
+   "pres": 75,
+   "exp": "tophalf",
+   "wealth": 1.05,
+   "short": "West Ham",
+   "rivals": [
+    "TOT",
+    "MUN"
+   ],
+   "league": "PL"
+  },
+  "WOL": {
+   "name": "Wolverhampton Wanderers",
+   "col": "#FDB913",
+   "col2": "#231F20",
+   "std": "Molineux",
+   "mgr": "Bruno Lage",
+   "budget": 60,
+   "pres": 70,
+   "exp": "mid",
+   "wealth": 0.9,
+   "short": "Wolves",
+   "rivals": [
+    "AVL"
+   ],
+   "league": "PL"
+  }
+ },
+ "foreignPres": {
+  "Real Madrid": 98,
+  "Barcelona": 94,
+  "Bayern Munich": 95,
+  "Paris Saint-Germain": 94,
+  "Juventus": 88,
+  "Atlético Madrid": 88,
+  "Borussia Dortmund": 85,
+  "Benfica": 80,
+  "Ajax": 80,
+  "PSV": 76,
+  "Sporting CP": 78,
+  "Napoli": 84,
+  "AC Milan": 86,
+  "Inter": 86
+ },
+ "foreignBuyers": [
+  "Real Madrid",
+  "Barcelona",
+  "Bayern Munich",
+  "Paris Saint-Germain",
+  "Juventus",
+  "AC Milan",
+  "Inter",
+  "Napoli",
+  "Borussia Dortmund",
+  "Atlético Madrid"
+ ],
+ "refs": [
+  "Michael Oliver",
+  "Anthony Taylor",
+  "Paul Tierney",
+  "Simon Hooper",
+  "Stuart Attwell",
+  "Craig Pawson",
+  "Andy Madley",
+  "Chris Kavanagh",
+  "Peter Bankes",
+  "David Coote",
+  "Robert Jones",
+  "John Brooks",
+  "Jarred Gillett",
+  "Darren England",
+  "Michael Salisbury",
+  "Tony Harrington",
+  "Thomas Bramall",
+  "Andre Marriner"
+ ],
+ "regions": {
+  "Britain & Ireland": [
+   "Premier League",
+   "Watford",
+   "Burnley",
+   "Luton Town",
+   "Stoke City",
+   "Bristol City",
+   "Man City U21"
+  ],
+  "Western Europe": [
+   "Barcelona",
+   "Real Sociedad",
+   "Atlético Madrid",
+   "Villarreal",
+   "Valencia",
+   "Real Betis",
+   "Paris Saint-Germain",
+   "Lyon",
+   "Lille",
+   "Rennes",
+   "Reims",
+   "Marseille",
+   "Monaco",
+   "Nice",
+   "Metz",
+   "Lorient",
+   "Benfica",
+   "Sporting CP",
+   "Juventus",
+   "Roma",
+   "Torino",
+   "Sassuolo",
+   "Atalanta",
+   "Sampdoria",
+   "Real Madrid"
+  ],
+  "Central & Northern Europe": [
+   "Ajax",
+   "PSV",
+   "Feyenoord",
+   "Borussia Dortmund",
+   "Bayern Munich",
+   "Hoffenheim",
+   "Stuttgart",
+   "Freiburg",
+   "Red Bull Salzburg",
+   "FC Copenhagen",
+   "Molde",
+   "AIK",
+   "FC Zürich",
+   "Genk",
+   "Anderlecht",
+   "Beşiktaş",
+   "Shakhtar Donetsk",
+   "Dynamo Kyiv",
+   "Dinamo Zagreb"
+  ],
+  "South America": [
+   "Palmeiras",
+   "Corinthians",
+   "Flamengo",
+   "Vasco da Gama",
+   "Racing Club",
+   "Rosario Central",
+   "Vélez Sarsfield"
+  ],
+  "Rest of the world": [
+   "Al Sadd",
+   "Chicago Fire",
+   "Central Coast Mariners",
+   "Free agent"
+  ]
+ }
+}

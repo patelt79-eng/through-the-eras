@@ -2,7 +2,18 @@
 'use strict';
 (function(){
 const E = ENGINE;
-E.init(window.GAME_DATA);
+// Season data lives in data/<season>/ and is fetched when an era is chosen or a save is opened.
+const BUILD='__BUILD__';
+let loadedEra=null;
+const eraId = era => String(era).replace('/','-');
+async function loadEra(id){
+  if (loadedEra===id) return true;
+  try{
+    const get=f=>fetch(`data/${id}/${f}.json?v=${BUILD}`).then(r=>{ if(!r.ok) throw new Error(f+' '+r.status); return r.json(); });
+    const [players,fixtures,real,season]=await Promise.all(['players','fixtures','real_table','season'].map(get));
+    window.GAME_DATA={players,fixtures,real,season}; E.init(window.GAME_DATA); loadedEra=id; return true;
+  }catch(e){ toast("Couldn't load that season. Check your connection and try again.",1); return false; }
+}
 const $ = s => document.querySelector(s);
 const app = $('#app');
 const OLD_SAVE_KEY = 'tte_save_v1'; // single save from v1, moved into slot 1 on first load
@@ -44,12 +55,13 @@ const Store=(()=>{
     del:k=>either(()=>run('readwrite',(m,s)=>{ m.delete(String(k)); s.delete(String(k)); }), ()=>{ try{ localStorage.removeItem('tte_state_'+k); localStorage.removeItem('tte_meta_'+k); }catch(e){} })
   };
 })();
-function metaOf(s,key){ const t=s.table[s.club]; return {slot:String(key), club:s.club, manager:s.manager, era:s.era, date:s.date, played:t?t.p:0, pos:t&&t.p?E.position(s.club):null, sacked:!!s.sacked, ended:!!s.ended, savedAt:Date.now(), forSlot:key==='auto'?curSlot:null}; }
+function metaOf(s,key){ const t=E.row(s.club), k=club(s.club)||{}; return {slot:String(key), club:s.club, clubName:k.name||s.club, col:k.col, col2:k.col2, manager:s.manager, era:s.era, date:s.date, played:t?t.p:0, pos:t&&t.p?E.position(s.club):null, sacked:!!s.sacked, ended:!!s.ended, savedAt:Date.now(), forSlot:key==='auto'?curSlot:null}; }
 async function refreshMetas(){ metas={}; try{ for(const m of await Store.allMeta()) metas[m.slot]=m; }catch(e){} }
 function firstFreeSlot(){ for(let i=1;i<=SLOTS;i++) if(!metas[i]) return i; return null; }
 function slotsUsed(){ let n=0; for(let i=1;i<=SLOTS;i++) if(metas[i]) n++; return n; }
 function continueTarget(){ if(metas.auto) return metas.auto; let best=null; for(let i=1;i<=SLOTS;i++){ const m=metas[i]; if(m&&(!best||m.savedAt>best.savedAt)) best=m; } return best; }
-function metaLine(m){ return `${E.CLUBS[m.club]?E.CLUBS[m.club].name:m.club} · ${m.manager} · ${m.era} · ${E.fmtDate(m.date)}`; }
+function metaClub(m){ const k=club(m.club); return {name:m.clubName||(k&&k.name)||m.club, col:m.col||(k&&k.col)||'#556', col2:m.col2||(k&&k.col2)||'#ccd'}; }
+function metaLine(m){ return `${metaClub(m).name} · ${m.manager} · ${m.era} · ${E.fmtDate(m.date)}`; }
 function ago(ts){ const s=(Date.now()-ts)/1000; if(s<60) return 'just now'; if(s<3600) return `${Math.floor(s/60)} min ago`; if(s<86400) return `${Math.floor(s/3600)} h ago`; const d=new Date(ts); return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); }
 let autoT=null;
 function save(){ if(!S()) return; clearTimeout(autoT); autoT=setTimeout(autosaveNow,250); }
@@ -64,6 +76,7 @@ async function leaveWithoutSaving(){ clearTimeout(autoT); try{ await Store.del('
 async function loadSlot(key){
   const st=await Store.load(key).catch(()=>null);
   if(!st){ toast("That save couldn't be opened.",1); return; }
+  if(!(await loadEra(eraId(st.era||'2022/23')))) return;
   E.S=E.migrate(st);
   curSlot = key==='auto' ? (metas.auto&&metas.auto.forSlot) || firstFreeSlot() || 1 : +key;
   tab='home'; renderHub();
@@ -73,8 +86,11 @@ async function boot(){
   await refreshMetas();
   try{ // move the single v1 save into slot 1
     const old=localStorage.getItem(OLD_SAVE_KEY);
-    if(old && !Object.keys(metas).length){ const s=E.migrate(JSON.parse(old)); E.S=s; curSlot=1; await Store.put(1,metaOf(s,1),s); localStorage.removeItem(OLD_SAVE_KEY); E.S=null; curSlot=null; await refreshMetas(); }
+    if(old && !Object.keys(metas).length && await loadEra('2022-23')){ const s=E.migrate(JSON.parse(old)); E.S=s; curSlot=1; await Store.put(1,metaOf(s,1),s); localStorage.removeItem(OLD_SAVE_KEY); E.S=null; curSlot=null; await refreshMetas(); }
   }catch(e){ E.S=null; curSlot=null; }
+  // saves made before v4 don't carry the club's name and colours: load that era so the menu can show them
+  const bare=Object.values(metas).find(m=>!m.clubName);
+  if (bare) await loadEra(eraId(bare.era||'2022/23'));
   renderTitle();
 }
 function toast(t, bad){ const el=document.createElement('div'); el.className='toast'+(bad?' bad':''); el.textContent=t; document.body.appendChild(el); setTimeout(()=>el.classList.add('out'),2600); setTimeout(()=>el.remove(),3100); }
@@ -86,7 +102,7 @@ function renderTitle(){
   app.innerHTML = `
   <section class="title">
     <div class="brand"><div class="logo">THROUGH<br>THE ERAS</div><p>Football career mode, any season from 1990. Designed by Mayan.</p></div>
-    ${cont?`<button class="resume" data-act="continueSave" style="--c1:${club(cont.club)?club(cont.club).col:'#556'};--c2:${club(cont.club)?club(cont.club).col2:'#ccd'}"><span class="kit"></span><span class="rt"><span class="rl">Continue</span><span class="rs">${esc(metaLine(cont))}${cont.slot==='auto'?' · <em>unsaved progress</em>':` · slot ${esc(cont.slot)}`}</span></span><span class="ra" aria-hidden="true">▶</span></button>`:''}
+    ${cont?`<button class="resume" data-act="continueSave" style="--c1:${metaClub(cont).col};--c2:${metaClub(cont).col2}"><span class="kit"></span><span class="rt"><span class="rl">Continue</span><span class="rs">${esc(metaLine(cont))}${cont.slot==='auto'?' · <em>unsaved progress</em>':` · slot ${esc(cont.slot)}`}</span></span><span class="ra" aria-hidden="true">▶</span></button>`:''}
     <div class="tiles">
       <button class="tile big" data-act="new"><span class="tl">Career Mode</span><span class="ts">New save</span>${svgPerson()}</button>
       <button class="tile big locked" data-act="intl" aria-disabled="true"><span class="tl">International</span><span class="ts">New save · coming in a later version</span>${svgGlobe()}</button>
@@ -98,13 +114,12 @@ function renderTitle(){
 }
 // mode: 'load' (from the menu), 'save' (from a career), 'new' (all slots full when starting a career)
 function renderSlots(mode){
-  const k=c=>club(c)||{col:'#556',col2:'#ccd',name:c};
   const rows=[]; for(let i=1;i<=SLOTS;i++){ const m=metas[i]; const cur=S()&&curSlot===i;
     let btns='';
     if(mode==='load') btns=m?`<button class="btn primary sm" data-act="loadSlot" data-k="${i}">Load</button><button class="btn danger sm" data-act="delSlotAsk" data-k="${i}" aria-label="Delete slot ${i}">Delete</button>`:'';
     else if(mode==='save') btns=`<button class="btn ${cur||!m?'primary':''} sm" data-act="saveSlotAsk" data-k="${i}">${cur?'Save':m?'Overwrite':'Save here'}</button>`;
     else btns=`<button class="btn ${m?'':'primary'} sm" data-act="newSlotAsk" data-k="${i}">${m?'Overwrite':'Use'}</button>`;
-    rows.push(`<li class="slot${m?'':' empty'}${cur?' cur':''}"><span class="sn">${i}</span>${m?`<span class="kit" style="--c1:${k(m.club).col};--c2:${k(m.club).col2}"></span><div class="si"><b>${esc(k(m.club).name)}</b><small>${esc(m.manager)} · ${esc(m.era)} · ${E.fmtDate(m.date)}${m.pos?` · ${E.ordinal(m.pos)} after ${m.played}`:''}${m.sacked?' · sacked':m.ended?' · season over':''}</small><small class="dim">Saved ${ago(m.savedAt)}${cur?' · this career':''}</small></div>`:`<div class="si"><b class="dim">Empty slot</b></div>`}<div class="sa">${btns}</div></li>`);
+    rows.push(`<li class="slot${m?'':' empty'}${cur?' cur':''}"><span class="sn">${i}</span>${m?`<span class="kit" style="--c1:${metaClub(m).col};--c2:${metaClub(m).col2}"></span><div class="si"><b>${esc(metaClub(m).name)}</b><small>${esc(m.manager)} · ${esc(m.era)} · ${E.fmtDate(m.date)}${m.pos?` · ${E.ordinal(m.pos)} after ${m.played}`:''}${m.sacked?' · sacked':m.ended?' · season over':''}</small><small class="dim">Saved ${ago(m.savedAt)}${cur?' · this career':''}</small></div>`:`<div class="si"><b class="dim">Empty slot</b></div>`}<div class="sa">${btns}</div></li>`);
   }
   const title={load:'Load save',save:'Save career',new:'Pick a save slot'}[mode];
   const lede={load:`${slotsUsed()} of ${SLOTS} slots used. Saves stay in this browser on this device.`,save:'Pick a slot. Saving over another career replaces it.',new:`All ${SLOTS} slots are full. Pick one to replace with your new career.`}[mode];
@@ -188,7 +203,7 @@ function renderHub(){
   app.innerHTML = `
   <header class="hud">
     <div class="hudl"><span class="crest" style="--c1:${k.col};--c2:${k.col2}"></span><div><div class="hc">${esc(k.name)}</div><div class="hm">${esc(s.manager)} · ${E.fmtDate(s.date)}</div></div></div>
-    <div class="hudr"><div><span>Budget</span><b>${money(s.budget[s.club])}</b></div><div><span>Wages</span><b>£${wagesNow()}k/${s.wageBudget}k</b></div><div><span>Position</span><b>${s.table[s.club].p?E.ordinal(E.position(s.club)):'–'}</b></div></div>
+    <div class="hudr"><div><span>Budget</span><b>${money(s.budget[s.club])}</b></div><div><span>Wages</span><b>£${wagesNow()}k/${s.wageBudget}k</b></div><div><span>Position</span><b>${E.played(s.club)?E.ordinal(E.position(s.club)):'–'}</b></div></div>
     <button class="exitx" data-act="exitAsk" aria-label="Leave this career" title="Leave this career">✕</button>
   </header>
   <nav class="bars" role="tablist"><span class="pad">L1</span>${TABS.map(([id,l])=>`<button role="tab" aria-selected="${tab===id}" class="bar${tab===id?' on':''}" data-act="tab" data-t="${id}">${l}${id==='home'&&unread?`<em>${unread}</em>`:''}</button>`).join('')}<span class="pad">R1</span></nav>
@@ -215,7 +230,7 @@ function viewHome(){
   const steps=[['coaches','Hire coaches','Pick two specialists for your backroom team.'],['media','Introduce yourself to the media','Your first press conference sets the tone.'],['plan','Set up your gameplan','Formation, style and starting XI.'],['scout','Set up a scouting network','Choose where your scouts look for talent.'],['objectives','Review objectives','See what the board expects this season.']];
   const done=steps.filter(x=>o[x[0]]).length;
   const tbl=E.sortedTable(); const me=tbl.indexOf(s.club);
-  const around=tbl.slice(Math.max(0,Math.min(me-2,15)),Math.max(0,Math.min(me-2,15))+5);
+  const st0=Math.max(0,Math.min(me-2,tbl.length-5)); const around=tbl.slice(st0,st0+5);
   return `<div class="grid home">
     ${E.onboardingDone()?'':`<section class="panel onboard"><div class="ph"><h2>Pre-season checklist</h2><span class="tag">${done}/5 · any order</span></div><p class="sub">The game won't move on until all five are done.</p>
       <ol class="steps">${steps.map(([k,t,d])=>`<li class="${o[k]?'done':''}"><button data-act="step" data-k="${k}"><span class="tick">${o[k]?'✓':''}</span><span><b>${t}</b><small>${d}</small></span></button></li>`).join('')}</ol></section>`}
@@ -228,17 +243,19 @@ function viewHome(){
 }
 function meter(l,v){ const c=v>=65?'good':v>=35?'mid':'bad'; return `<div class="meter ${c}"><span>${l}</span><div class="mt"><i style="width:${Math.round(v)}%"></i></div><b>${Math.round(v)}</b></div>`; }
 function nextCard(f){
-  const s=S(); const opp=f.h===s.club?f.a:f.h; const k=club(opp); const t=s.table[opp];
-  return `<section class="panel next" style="--c1:${k.col};--c2:${k.col2}"><div class="ph"><h2>Next match</h2><span class="tag">Matchweek ${f.gw}</span></div>
+  const s=S(); const opp=f.h===s.club?f.a:f.h; const k=club(opp)||{col:'#556',col2:'#ccd',std:''}; const t=E.row(opp)||{p:0,form:[]};
+  return `<section class="panel next" style="--c1:${k.col};--c2:${k.col2}"><div class="ph"><h2>Next match</h2><span class="tag">${esc(fxLabel(f))}</span></div>
   <div class="vs"><div>${chip(f.h)}<b>${esc(E.shortName(f.h))}</b></div><span>v</span><div>${chip(f.a)}<b>${esc(E.shortName(f.a))}</b></div></div>
-  <p class="sub">${E.fmtDate(f.d)} · ${f.t} · ${esc(club(f.h).std)}</p>
+  <p class="sub">${E.fmtDate(f.d)} · ${f.t} · ${esc(f.venue||(club(f.h)&&club(f.h).std)||'')}</p>
   <p class="sub">${esc(E.shortName(opp))}: ${t.p?`${E.ordinal(E.position(opp))}, form ${t.form.map(x=>`<span class="fm ${x}">${x}</span>`).join('')}`:'first game of the season'} · manager ${esc(s.managers[opp])}</p></section>`;
 }
 function inboxList(n){
   const s=S(); if(!s.inbox.length) return '<p class="empty">Nothing yet.</p>';
   return `<ul class="inbox">${s.inbox.slice(0,n).map(m=>`<li class="${m.read?'':'unread'} k-${m.kind}"><button data-act="openMsg" data-id="${m.id}"><span class="md">${E.fmtDate(m.d).slice(0,6)}</span><b>${esc(m.title)}</b>${m.action&&!m.done?'<em>Action</em>':''}</button></li>`).join('')}</ul>`;
 }
-function miniTable(rows){ const s=S(); return `<table class="tbl mini"><tbody>${rows.map(c=>{const t=s.table[c];return `<tr class="${c===s.club?'me':''}"><td class="num">${E.position(c)}</td><td>${chip(c,1)} ${esc(E.shortName(c))}</td><td class="num">${t.p}</td><td class="num">${t.gf-t.ga>0?'+':''}${t.gf-t.ga}</td><td class="num b">${t.pts}</td></tr>`;}).join('')}</tbody></table>`; }
+// "Premier League · Matchweek 3", "FA Cup · Third round replay", "Champions League · Group B · matchday 2"
+function fxLabel(f){ const c=E.compName(f.comp||E.mainLeague()); return f.rd?`${c} · ${f.rd}${f.leg===2?' · second leg':f.tie&&f.leg===1&&!f.replay&&E.S.fixtures.some(x=>x.tie===f.tie&&x.leg===2)?' · first leg':''}`:`${c} · Matchweek ${f.gw}`; }
+function miniTable(rows){ const s=S(); return `<table class="tbl mini"><tbody>${rows.map(c=>{const t=E.row(c);return `<tr class="${c===s.club?'me':''}"><td class="num">${E.position(c)}</td><td>${chip(c,1)} ${esc(E.shortName(c))}</td><td class="num">${t.p}</td><td class="num">${t.gf-t.ga>0?'+':''}${t.gf-t.ga}</td><td class="num b">${t.pts}</td></tr>`;}).join('')}</tbody></table>`; }
 function feed(items){
   if(!items.length) return '<p class="empty">No posts yet.</p>';
   return `<ul class="feed">${items.map(n=>{const c=n.who.club&&club(n.who.club); return `<li class="post ${n.who.kind}${n.big?' big':''}"><span class="av" style="${c?`--c1:${c.col};--c2:${c.col2}`:''}">${esc(n.who.name.slice(0,1))}</span><div><div class="pw"><b>${esc(n.who.name)}</b>${n.who.kind==='club'||n.who.kind==='league'?'<span class="vf" title="Verified">✔</span>':''}<span>${esc(n.who.h)} · ${E.fmtDate(n.d).slice(0,6)}</span></div><p>${esc(n.text)}</p><div class="pl">♥ ${n.likes.toLocaleString('en-GB')}</div></div></li>`;}).join('')}</ul>`;
@@ -342,13 +359,14 @@ function viewScout(){
 
 // TABLE
 function viewTable(){
-  const s=S(); const t=E.sortedTable();
+  const s=S(); const t=E.sortedTable(); const lg=E.mainLeague(); const z=(E.COMPS[lg]&&E.COMPS[lg].zones)||{};
+  const zone=i=> i<(z.ucl||0)?'ucl' : i<(z.ucl||0)+(z.uel||0)?'uel' : i<(z.promo||0)?'ucl' : z.rel&&i>=t.length-z.rel?'rel' : '';
   const scorers=s.ids.map(E.P).filter(p=>p.g>0).sort((a,b)=>b.g-a.g||a.apps-b.apps).slice(0,10);
   const assists=s.ids.map(E.P).filter(p=>p.a>0).sort((a,b)=>b.a-a.a).slice(0,10);
   return `<div class="grid tablev">
-  <section class="panel wide"><div class="ph"><h2>${esc(E.SEASON.competition)} ${esc(s.era)}</h2></div><div class="tscroll"><table class="tbl league"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num hide-s">GF</th><th class="num hide-s">GA</th><th class="num">GD</th><th class="num">Pts</th><th class="hide-s">Form</th></tr></thead><tbody>
-  ${t.map((c,i)=>{const r=s.table[c];return `<tr class="${c===s.club?'me':''} ${i<4?'ucl':i===4?'uel':i>=17?'rel':''}"><td class="num">${i+1}</td><td>${chip(c,1)} ${esc(E.CLUBS[c].name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num hide-s">${r.gf}</td><td class="num hide-s">${r.ga}</td><td class="num">${r.gf-r.ga>0?'+':''}${r.gf-r.ga}</td><td class="num b">${r.pts}</td><td class="hide-s">${r.form.map(x=>`<span class="fm ${x}">${x}</span>`).join('')}</td></tr>`;}).join('')}</tbody></table></div>
-  <p class="sub legend"><span class="lg ucl"></span>Champions League <span class="lg uel"></span>Europa League <span class="lg rel"></span>Relegation</p></section>
+  <section class="panel wide"><div class="ph"><h2>${esc(E.compName(lg))} ${esc(s.era)}</h2></div><div class="tscroll"><table class="tbl league"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num hide-s">GF</th><th class="num hide-s">GA</th><th class="num">GD</th><th class="num">Pts</th><th class="hide-s">Form</th></tr></thead><tbody>
+  ${t.map((c,i)=>{const r=E.row(c);return `<tr class="${c===s.club?'me':''} ${zone(i)}"><td class="num">${i+1}</td><td>${chip(c,1)} ${esc(E.CLUBS[c].name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num hide-s">${r.gf}</td><td class="num hide-s">${r.ga}</td><td class="num">${r.gf-r.ga>0?'+':''}${r.gf-r.ga}</td><td class="num b">${r.pts}</td><td class="hide-s">${r.form.map(x=>`<span class="fm ${x}">${x}</span>`).join('')}</td></tr>`;}).join('')}</tbody></table></div>
+  <p class="sub legend">${z.ucl?'<span class="lg ucl"></span>Champions League ':''}${z.uel?'<span class="lg uel"></span>Europa League ':''}${z.promo?'<span class="lg ucl"></span>Promotion ':''}${z.rel?'<span class="lg rel"></span>Relegation':''}</p></section>
   <section class="panel"><div class="ph"><h2>Top scorers</h2></div><ol class="lb">${scorers.map(p=>`<li><button data-act="player" data-id="${p.id}"><b>${esc(p.n)}</b>${chip(p.c,1)}<span class="num">${p.g}</span></button></li>`).join('')||'<li class="empty">No goals yet.</li>'}</ol>
   <div class="ph"><h2>Assists</h2></div><ol class="lb">${assists.map(p=>`<li><button data-act="player" data-id="${p.id}"><b>${esc(p.n)}</b>${chip(p.c,1)}<span class="num">${p.a}</span></button></li>`).join('')||'<li class="empty">No assists yet.</li>'}</ol></section>
   </div>`;
@@ -363,9 +381,9 @@ function viewRecords(){
   return `<div class="grid rec">
   ${s.ended?`<section class="panel wide finale"><div class="ph"><h2>Season review</h2></div><p class="lede">${esc(E.CLUBS[t[0]].name)} are champions. You finished ${E.ordinal(E.position(s.club))}. ${E.position(s.club)<=s.objective.pos?'Objective achieved.':'Objective missed.'}</p></section>`:''}
   <section class="panel"><div class="ph"><h2>Your results</h2></div>${res.length?`<ul class="results">${res.map(r=>{const us=r.h===s.club?r.hg-r.ag:r.ag-r.hg; return `<li class="${us>0?'W':us<0?'L':'D'}"><span>${E.fmtDate(r.d).slice(0,6)}</span><b>${esc(E.shortName(r.h))} ${r.hg}–${r.ag} ${esc(E.shortName(r.a))}</b></li>`;}).join('')}</ul>`:'<p class="empty">No matches played yet.</p>'}</section>
-  <section class="panel"><div class="ph"><h2>Real 2022/23 vs your season</h2></div><p class="sub">What really happened, next to your version of history.</p><table class="tbl mini"><thead><tr><th class="num">#</th><th>Real life</th><th>Your game</th></tr></thead><tbody>${real.map((c,i)=>`<tr><td class="num">${i+1}</td><td class="${c===s.club?'b':''}">${esc(E.shortName(c))}</td><td class="${t[i]===s.club?'b':''}">${s.table[t[i]].p?esc(E.shortName(t[i])):'<span class="dim">–</span>'}</td></tr>`).join('')}</tbody></table></section>
+  <section class="panel"><div class="ph"><h2>Real ${esc(s.era)} vs your season</h2></div><p class="sub">What really happened, next to your version of history.</p><table class="tbl mini"><thead><tr><th class="num">#</th><th>Real life</th><th>Your game</th></tr></thead><tbody>${real.map((c,i)=>`<tr><td class="num">${i+1}</td><td class="${c===s.club?'b':''}">${esc(E.shortName(c))}</td><td class="${t[i]===s.club?'b':''}">${t[i]&&E.played(t[i])?esc(E.shortName(t[i])):'<span class="dim">–</span>'}</td></tr>`).join('')}</tbody></table></section>
   <section class="panel"><div class="ph"><h2>Transfers</h2></div>${tr.length?`<ul class="deals">${tr.map(x=>`<li><span class="dim">${E.fmtDate(x.d).slice(0,6)}</span> <b>${esc(E.P(x.id).n)}</b> <span class="dim">${esc(x.from)} → ${esc(x.to)}</span> <span>${x.loan?'loan':money(x.fee)}</span></li>`).join('')}</ul>`:'<p class="empty">No transfers yet.</p>'}</section>
-  <section class="panel"><div class="ph"><h2>Manager changes</h2></div>${s.log.mgr.length?`<ul class="deals">${s.log.mgr.map(x=>`<li><span class="dim">${E.fmtDate(x.d).slice(0,6)}</span> ${chip(x.c,1)} ${esc(x.out)} → <b>${esc(x.inn)}</b></li>`).join('')}</ul>`:'<p class="empty">None yet. Real 2022/23 sackings replay unless results change history.</p>'}</section>
+  <section class="panel"><div class="ph"><h2>Manager changes</h2></div>${s.log.mgr.length?`<ul class="deals">${s.log.mgr.map(x=>`<li><span class="dim">${E.fmtDate(x.d).slice(0,6)}</span> ${chip(x.c,1)} ${esc(x.out)} → <b>${esc(x.inn)}</b></li>`).join('')}</ul>`:`<p class="empty">None yet. Real ${esc(s.era)} sackings replay unless results change history.</p>`}</section>
   </div>`;
 }
 // SETTINGS
@@ -479,7 +497,7 @@ function renderPreMatch(){
   const m=live.m, f=live.f; const s=S();
   app.innerHTML=`<section class="matchday">
     <div class="mhead"><div class="mt1">${chip(m.h)} <b>${esc(club(m.h).name)}</b> <span>vs</span> <b>${esc(club(m.a).name)}</b> ${chip(m.a)}</div>
-    <div class="mt2">${esc(club(m.h).std)} · ${f.t} · Referee: ${esc(m.ref)} · ${esc(m.weather)} · Premier League · Matchweek ${f.gw}</div></div>
+    <div class="mt2">${esc(m.venue)} · ${f.t} · Referee: ${esc(m.ref)} · ${esc(m.weather)} · ${esc(fxLabel(f))}</div></div>
     <div class="lus">${lineupBoard(0)}${lineupBoard(1)}</div>
     <div class="formrow center"><button class="btn" data-act="toTactics">Change team</button><button class="btn primary big" data-act="kickoff">Kick off ▶</button><button class="btn" data-act="simMatch">Quick result</button></div>
   </section>`;
@@ -501,7 +519,7 @@ function renderLive(){
          <div class="formrow"><button class="btn ${live.paused?'primary':''}" data-act="playPause">${live.paused?(m.min===0?'Kick off ▶':'Resume ▶'):'Pause ❚❚'}</button><button class="btn" data-act="skipEnd">Skip to end ⏭</button></div>
          <div class="formrow"><span class="sub">Speed</span>${[[1,'1×'],[2,'2×'],[4,'4×']].map(([v,l])=>`<button class="seg${s.matchSpeed==v?' on':''}" data-act="lspeed" data-v="${v}">${l}</button>`).join('')}</div>
          <div class="formrow"><span class="sub">Mentality</span>${[[2,'Defend'],[0,'Balanced'],[1,'Attack']].map(([v,l])=>`<button class="seg${m.mentality[us]==v?' on':''}" data-act="mental" data-v="${v}">${l}</button>`).join('')}</div>
-         <button class="btn" data-act="subsOpen">Substitutions (${5-m.subs[us]} left)</button>`}
+         <button class="btn" data-act="subsOpen">Substitutions (${E.RULES.subs-m.subs[us]} left)</button>`}
        </div>
      </div>
    </div></section>`;
@@ -527,7 +545,7 @@ function playLive(){ if(!live) return; live.paused=false; renderLive(); live.tim
 function subsModal(){
   const m=live.m, us=live.us; const st=us?m.setup.a:m.setup.h;
   const on=E.onPitch(m,us); const bench=st.bench.map(E.P).filter(p=>!m.ratings[p.id]);
-  openModal(`<div class="msg subs"><h2>Substitution</h2><p class="sub">${5-m.subs[us]} of 5 left. Pick who comes off, then who comes on.</p>
+  openModal(`<div class="msg subs"><h2>Substitution</h2><p class="sub">${E.RULES.subs-m.subs[us]} of ${E.RULES.subs} left. Pick who comes off, then who comes on.</p>
   <div class="subcols"><div><h3>Off</h3><ul class="plist">${on.map(p=>`<li><button data-act="subOff" data-id="${p.id}"><span class="pos p-${E.GROUP[E.slotOf(m,us,p.id)]}">${E.slotOf(m,us,p.id)}</span><b>${esc(p.n)}</b><span class="dim">${m.ratings[p.id].r.toFixed(1)}${m.ratings[p.id].injured?' 🚑':''}${m.ratings[p.id].yc?' 🟨':''}</span></button></li>`).join('')}</ul></div>
   <div><h3>On</h3><ul class="plist">${bench.map(p=>`<li><button data-act="subOn" data-id="${p.id}"><span class="pos p-${E.GROUP[p.p]}">${p.p}</span><b>${esc(p.n)}</b><span class="ovr ${ratingClass(E.ovr(p))}">${E.ovr(p)}</span></button></li>`).join('')}</ul></div></div><div id="mres" class="mres"></div></div>`,'wide');
 }
@@ -556,11 +574,11 @@ document.addEventListener('click', e=>{
     case 'title': pauseLive(); live=null; closeModal(); renderTitle(); break;
     case 'new': pending={}; renderEras(); break;
     case 'intl': toast('International mode is planned for a later version.'); break;
-    case 'challenges': renderChallenges(); break;
+    case 'challenges': loadEra('2022-23').then(ok=>{ if(ok) renderChallenges(); }); break;
     case 'pickChallenge': { const c=CHALLENGES.find(x=>x.id===t.dataset.id); pending={club:c.club,challenge:c}; renderManager(); break; }
     case 'load': refreshMetas().then(()=>renderSlots('load')); break;
     case 'eras': renderEras(); break;
-    case 'era22': renderClubs(); break;
+    case 'era22': loadEra('2022-23').then(ok=>{ if(ok) renderClubs(); }); break;
     case 'pickClub': pending.club=t.dataset.c; renderManager(); break;
     case 'startNew': { const n=($('#mname').value||'').trim(); if(!n){ toast('Type your manager name first.',1); $('#mname').focus(); return; } startGame(n,false); break; }
     case 'startReal': startGame(club(pending.club).mgr,true); break;
@@ -654,6 +672,6 @@ document.addEventListener('keydown', e=>{
 // boot
 const hot = window.claude && window.claude.hot;
 if (hot && hot.snapshot) hot.snapshot(()=>({save:S(), tab, slot:curSlot}));
-function start(data){ if(data&&data.save){ E.S=E.migrate(data.save); tab=data.tab||'home'; curSlot=data.slot||null; refreshMetas().then(renderHub); } else boot(); }
+function start(data){ if(data&&data.save){ loadEra(eraId(data.save.era||'2022/23')).then(ok=>{ if(!ok) return boot(); E.S=E.migrate(data.save); tab=data.tab||'home'; curSlot=data.slot||null; refreshMetas().then(renderHub); }); } else boot(); }
 if (hot && hot.ready) hot.ready(start); else start((hot&&hot.data)||{});
 })();

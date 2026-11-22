@@ -27,14 +27,14 @@ Later: International mode, multi-season careers, more eras.
 
 ## Layout
 
-- `index.html` — the built game (one self-contained file). **Generated — do not edit by hand.**
+- `index.html` — the built game (engine + UI in one file). **Generated — do not edit by hand.** Season data is not inlined: the page fetches `data/<season>/*.json` when an era is picked, so it needs a web server (GitHub Pages, or the `game` server in `.claude/launch.json`), not `file://`.
 - `src/template.html` — HTML shell and all CSS (dark floodlit look, Saira Condensed + Barlow)
 - `src/engine.js` — pure game logic, no DOM: match engine, table, transfers, contracts, calendar, news, board
 - `src/ui.js` — all screens and event handling
-- `src/build.py` — inlines data + engine + ui into `index.html`
-- `data/players.json`, `data/fixtures.json`, `data/real_table.json` — 2022/23 data
-- `data/season.json` — per-season config: start date, transfer windows, dated real-world events (e.g. World Cup break), real manager changes. New eras add their own.
-- `tools/` — the scripts that produced the 2022/23 data, and `test.js` (headless full-season sim)
+- `src/build.py` — inlines engine + ui into `index.html` and stamps a build hash used to bust cached data
+- `data/eras.json` — list of seasons. `data/<season>/` (e.g. `data/2022-23/`) holds `players.json`, `fixtures.json`, `real_table.json` and `season.json`.
+- `season.json` holds everything era-specific: clubs (colours, stadium, manager, budget, `league`, rivals), rules (`subs`, `bench`, `awayGoals`, `points`), competitions, transfer windows, dated real events, real manager changes, referees, scouting regions, foreign buyers.
+- `tools/` — the scripts that produced the 2022/23 data, `test.js` (headless full-season sim) and `test_comps.js` (made-up season testing two divisions, a cup and a European group competition)
 
 ## Commands
 
@@ -42,6 +42,7 @@ Later: International mode, multi-season careers, more eras.
 python3 src/build.py          # rebuild index.html after any change in src/ or data/
 # play locally: start the "game" server in .claude/launch.json (http://localhost:8765)
 node tools/test.js LIV 1      # simulate a whole season headless (club code, seed)
+node tools/test_comps.js LIV 5   # competition engine checks over 5 seeds; exits non-zero on failure
 ```
 
 Sanity targets for a simulated 2022/23 season: champion on roughly 85–95 points, about 2.5–2.9 goals a game (real: 2.85), bottom club around 20–35 points.
@@ -59,7 +60,7 @@ Sanity targets for a simulated 2022/23 season: champion on roughly 85–95 point
 
 ## Engine notes
 
-- Game state lives in `ENGINE.S` (shape version `S.v`, currently 3). Add defaults for new fields in `ENGINE.migrate()` so old saves keep loading.
+- Game state lives in `ENGINE.S` (shape version `S.v`, currently 4). Add defaults for new fields in `ENGINE.migrate()` so old saves keep loading.
 - Saves: 15 slots in IndexedDB (`through-the-eras` DB, stores `meta` and `state`; localStorage fallback). A hidden `auto` record is written after every action for crash recovery; a slot only changes when the player saves. The red ✕ (leave without saving) deletes `auto`. The old single `tte_save_v1` save is moved into slot 1 on first load.
 - Time moves day by day: `advanceStep()` stops on any day a message of a stopping kind arrives (`STOP_KINDS` in `msg()`), or on match day. `advance()` ignores stops and is only for the headless sim.
 - `realHistory`, `REAL_SACKINGS` and the external players' `rt`/`rw` fields drive history replaying. Keep this pattern per era.
@@ -71,3 +72,5 @@ Sanity targets for a simulated 2022/23 season: champion on roughly 85–95 point
 - Tejas wants direct answers and his ideas challenged where they're weak.
 - Before pushing: rebuild, run `tools/test.js` for two or three seeds, and play a few matches in a browser.
 - Commit and push only when asked.
+- Competitions (`season.json` → `competitions`): `league` (table in `S.tables[id]`; fixtures from fixtures.json or generated from `dates`), `cup` (rounds with `enter`, `legs`, `replay`, `neutral`, optional fixed `ties`), `groups` (group tables in `S.tables['ID:A']`, then knockout `rounds`). Knockout state is in `S.cups[id]`. Each fixture has `comp`; cup fixtures also have `tie`, `leg`, `rd`.
+- Knockout deciders go to extra time and penalties inside `finalize()`, so live matches and the headless sim share the same path. Draws in rounds with a `replay` date get a replay instead.
