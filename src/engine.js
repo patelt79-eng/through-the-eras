@@ -29,22 +29,10 @@ var ENGINE = (function () {
   const RIVALS = {LIV:['MUN','EVE','MCI'],EVE:['LIV'],MUN:['LIV','MCI','LEE'],MCI:['MUN','LIV'],ARS:['TOT','CHE'],TOT:['ARS','CHE','WHU'],CHE:['TOT','ARS'],WHU:['TOT','MUN'],LEE:['MUN'],AVL:['WOL'],WOL:['AVL'],NEW:[],NFO:['LEI'],LEI:['NFO'],SOU:[],BOU:['SOU'],BHA:['CRY'],CRY:['BHA'],BRE:[],FUL:[]};
   const EXPECT = {title:{label:'Win the Premier League',pos:1,ok:2},top4:{label:'Finish in the top four',pos:4,ok:6},tophalf:{label:'Finish in the top half',pos:10,ok:12},mid:{label:'A comfortable mid-table finish',pos:12,ok:15},survive:{label:'Avoid relegation',pos:17,ok:17}};
   const REFS = ['Michael Oliver','Anthony Taylor','Paul Tierney','Simon Hooper','Stuart Attwell','Craig Pawson','Andy Madley','Chris Kavanagh','Peter Bankes','David Coote','Robert Jones','John Brooks','Jarred Gillett','Darren England','Michael Salisbury','Tony Harrington','Thomas Bramall','Andre Marriner'];
-  // real 2022/23 manager changes (history replays unless your results change it)
-  const REAL_SACKINGS = [
-    {d:'2022-08-30',c:'BOU',out:'Scott Parker',inn:"Gary O'Neil",cond:'any'},
-    {d:'2022-09-07',c:'CHE',out:'Thomas Tuchel',inn:'Graham Potter',cond:'board',fromC:'BHA'},
-    {d:'2022-09-18',c:'BHA',out:'Graham Potter',inn:'Roberto De Zerbi',cond:'after',after:'CHE'},
-    {d:'2022-10-24',c:'AVL',out:'Steven Gerrard',inn:'Unai Emery',cond:'poor'},
-    {d:'2022-11-05',c:'WOL',out:'Bruno Lage',inn:'Julen Lopetegui',cond:'poor'},
-    {d:'2022-11-07',c:'SOU',out:'Ralph Hasenhüttl',inn:'Nathan Jones',cond:'poor'},
-    {d:'2023-01-23',c:'EVE',out:'Frank Lampard',inn:'Sean Dyche',cond:'poor'},
-    {d:'2023-02-06',c:'LEE',out:'Jesse Marsch',inn:'Javi Gracia',cond:'poor'},
-    {d:'2023-02-12',c:'SOU',out:'Nathan Jones',inn:'Rubén Sellés',cond:'poor'},
-    {d:'2023-03-21',c:'CRY',out:'Patrick Vieira',inn:'Roy Hodgson',cond:'poor'},
-    {d:'2023-03-26',c:'TOT',out:'Antonio Conte',inn:'Cristian Stellini',cond:'poor'},
-    {d:'2023-04-02',c:'CHE',out:'Graham Potter',inn:'Frank Lampard',cond:'poor'},
-    {d:'2023-04-10',c:'LEI',out:'Brendan Rodgers',inn:'Dean Smith',cond:'poor'}
-  ];
+  // Season config (dates, windows, real events, real manager changes) comes from data/season.json.
+  // History replays unless your results change it.
+  let SEASON = null;
+  let REAL_SACKINGS = [];
   const FORMATIONS = {
     '4-3-3':   ['GK','RB','CB','CB','LB','DM','CM','CM','RW','ST','LW'],
     '4-2-3-1': ['GK','RB','CB','CB','LB','DM','DM','RW','AM','LW','ST'],
@@ -100,7 +88,16 @@ var ENGINE = (function () {
   let S = null; // game state
   let DATA = null;
 
-  function init(data){ DATA=data; }
+  function init(data){
+    DATA=data; SEASON=data.season; REAL_SACKINGS=SEASON.sackings||[];
+    Object.assign(HANDLES, SEASON.handles||{});
+  }
+  // bring an older save up to the current state shape
+  function migrate(s){
+    if (!s) return s;
+    s.stops=s.stops||[]; s.scoutJobs=s.scoutJobs||[]; s.scoutKnown=s.scoutKnown||[];
+    s.v=3; return s;
+  }
 
   function P(id){ return S.players[id]; }
   function clubPlayers(c){ return S.ids.filter(id=>S.players[id].c===c).map(id=>S.players[id]); }
@@ -128,7 +125,7 @@ var ENGINE = (function () {
   // ---------- new game ----------
   function newGame(opt){
     setSeed(opt.seed || Math.floor(Math.random()*1e9));
-    S = {v:2, era:'2022/23', club:opt.club, manager:opt.manager, realMgr:!!opt.realMgr, date:'2022-07-31', season:1,
+    S = {v:3, era:SEASON.era, club:opt.club, manager:opt.manager, realMgr:!!opt.realMgr, date:SEASON.start, season:1, stops:[], scoutJobs:[], scoutKnown:[],
       players:{}, ids:[], fixtures:[], fi:0, table:{}, news:[], inbox:[], offers:[], log:{transfers:[],results:[],mgr:[],seasons:[]},
       budget:{}, wageBudget:0, formation:'4-3-3', style:'Possession', xi:[], bench:[], onboard:{coaches:false,media:false,plan:false,scout:false,objectives:false},
       coaches:[], scoutRegion:null, mediaTone:null, board:60, fans:60, objective:EXPECT[CLUBS[opt.club].exp], challenge:opt.challenge||null,
@@ -138,7 +135,7 @@ var ENGINE = (function () {
     for (const x of DATA.players){
       const p = Object.assign({}, x);
       p.form=0; p.morale=65+rint(0,15); p.fit=100; p.inj=0; p.injName=null; p.apps=0; p.g=0; p.a=0; p.rs=0; p.motm=0; p.mins=0; p.cs=0; p.loan=null; p.listed=false; p.unhappy=false; p.yc=0; p.ban=0;
-      p.ce = 2023 + Math.floor(R()*4) + (age2(p.dob)<=23?1:0); // contract end year (estimate)
+      p.ce = (parseInt(SEASON.start)+1) + Math.floor(R()*4) + (age2(p.dob)<=23?1:0); // contract end year (estimate)
       p.wage = fairWage(p, p.c==='EXT'? (p.fr||'EXT') : p.c);
       if (p.c==='EXT' && p.fr==='Free agent') p.wage=fairWage(p,'X');
       S.players[p.id]=p; S.ids.push(p.id);
@@ -155,14 +152,14 @@ var ENGINE = (function () {
     msg('board', 'Welcome from the board', `Your target this season: ${S.objective.label}. Transfer budget £${S.budget[opt.club]}m, wage budget £${S.wageBudget}k a week. Complete your pre-season checklist before the first match.`);
     return S;
   }
-  function age2(dob){ return dob? ageOn(dob,'2022-08-05'):25; }
+  function age2(dob){ return dob? ageOn(dob,SEASON.ageRef):25; }
 
   // ---------- news / inbox ----------
   const HANDLES = {
     insider:{name:'Transfer Insider',h:'@transferinsider',kind:'insider'},
     club:null, pundit:{name:'Pundit FC',h:'@punditfc',kind:'pundit'},
     stats:{name:'Opta-style Stats',h:'@numbersgame',kind:'stats'},
-    fans:null, league:{name:'Premier League',h:'@premierleague',kind:'league'}, board:null, wc:{name:'World Cup 2022',h:'@qatar2022',kind:'league'}
+    fans:null, league:{name:'Premier League',h:'@premierleague',kind:'league'}, board:null
   };
   function post(kind, text, opt){
     opt=opt||{};
@@ -174,9 +171,13 @@ var ENGINE = (function () {
     S.news.unshift({id:++S.msgN, d:S.date, who, text, big:!!opt.big, likes: Math.round((opt.big?40:5)*Math.exp(R()*3))*100+rint(0,99)});
     if (S.news.length>250) S.news.length=250;
   }
-  function msg(kind, title, body, action){
-    S.inbox.unshift({id:++S.msgN, d:S.date, kind, title, body, action:action||null, read:false});
+  // Messages of these kinds stop the calendar so the manager can deal with them.
+  const STOP_KINDS = {board:1,transfer:1,contract:1,offer:1,squad:1,scout:1};
+  function msg(kind, title, body, action, stop){
+    const id=++S.msgN;
+    S.inbox.unshift({id, d:S.date, kind, title, body, action:action||null, read:false});
     if (S.inbox.length>80) S.inbox.length=80;
+    if (stop===undefined ? STOP_KINDS[kind] : stop) (S.stops=S.stops||[]).push(id);
   }
 
   // ---------- team selection ----------
@@ -421,19 +422,35 @@ var ENGINE = (function () {
 
   // ---------- calendar ----------
   function nextUserFixture(){ return S.fixtures.find(f=>!f.played && (f.h===S.club||f.a===S.club)); }
-  function windowOpen(d){ d=d||S.date; return (d<='2022-09-01') || (d>='2023-01-01'&&d<='2023-01-31') || (d>=`${seasonYear()}-06-10`); }
-  function windowName(){ const d=S.date; if(d<='2022-09-01') return 'Summer window (closes 1 Sep, 23:00)'; if(d>='2023-01-01'&&d<='2023-01-31') return 'January window (closes 31 Jan)'; if(d<'2023-01-01') return 'Window closed (January window opens 1 Jan)'; return 'Window closed'; }
+  function currentWindow(d){ d=d||S.date; return SEASON.windows.find(w=>d>=w.open&&d<=w.close)||null; }
+  function windowOpen(d){ d=d||S.date; return !!currentWindow(d) || d>=`${seasonYear()}-${SEASON.nextSummerOpen}`; }
+  function windowName(){
+    const w=currentWindow(); if (w) return `${w.name} (${w.closeLabel})`;
+    const nx=SEASON.windows.find(x=>x.open>S.date);
+    return nx? `Window closed (${nx.name.replace(' window','')} window opens ${fmtDate(nx.open).replace(/ \d{4}$/,'')})` : 'Window closed';
+  }
   function onboardingDone(){ const o=S.onboard; return o.coaches&&o.media&&o.plan&&o.scout&&o.objectives; }
-  // advance until the day of the user's next match (not played). returns 'match' | 'end' | 'blocked'
+  // Run straight to the user's next match day, ignoring events (used by the headless sim).
   function advance(){
-    if (S.sacked) return 'sacked';
-    if (!onboardingDone()) return 'blocked';
+    let r; do { r=advanceStep(); } while (r.r==='event'); return r.r;
+  }
+  // Advance day by day. Stops on the first day something needs the manager's attention
+  // (a bid, a reply, a scouting report, a board or player message), or on match day.
+  // Returns {r:'event'|'match'|'end'|'sacked'|'blocked', days, stops:[message ids]}.
+  function advanceStep(){
+    if (S.sacked) return {r:'sacked',days:0,stops:[]};
+    if (!onboardingDone()) return {r:'blocked',days:0,stops:[]};
     const nf=nextUserFixture();
-    if (!nf){ endSeason(); return 'end'; }
-    while (S.date < nf.d){ S.date=addDays(S.date,1); dailyTick(); if(S.sacked) return 'sacked'; }
+    if (!nf){ endSeason(); return {r:'end',days:0,stops:[]}; }
+    S.stops=[]; let days=0;
+    while (S.date < nf.d){
+      S.date=addDays(S.date,1); days++; dailyTick();
+      if (S.sacked) return {r:'sacked',days,stops:S.stops.splice(0)};
+      if (S.stops.length && S.date < nf.d) return {r:'event',days,stops:S.stops.splice(0)};
+    }
     // simulate AI fixtures on match day before user's kickoff
     playAIFixtures(S.date, nf.t);
-    return 'match';
+    return {r:'match',days,stops:S.stops.splice(0)};
   }
   function playAIFixtures(d, beforeTime){
     for (const f of S.fixtures){ if(f.played||f.d!==d) continue; if(f.h===S.club||f.a===S.club) continue; if(beforeTime && f.t>beforeTime) continue; const m=simMatch(f,setupFor(f)); runToEnd(m,-1); finalize(m); }
@@ -445,18 +462,72 @@ var ENGINE = (function () {
     for (const id of S.ids){ const p=S.players[id];
       if(p.inj>0){ p.inj--; if(p.inj===0){ p.injName=null; if(p.c===S.club) msg('medical',`${p.n} is fit again`,`${p.fn} has recovered and is available for selection.`);} }
       p.fit=clamp(p.fit+ (S.coaches.includes('fitness')?5:4),0,100);
-      if (chance(0.0006) && p.c!=='EXT' && !p.loan){ p.inj=pick([5,7,14,21,35]); p.injName=pick(['training knock','muscle strain','illness','ankle knock']); if(p.c===S.club) msg('medical',`${p.n} injured in training`,`${p.fn} will miss around ${p.inj} days with a ${p.injName}.`); }
+      if (chance(0.0006) && p.c!=='EXT' && !p.loan){ p.inj=pick([5,7,14,21,35]); p.injName=pick(['training knock','muscle strain','illness','ankle knock']); if(p.c===S.club) msg('medical',`${p.n} injured in training`,`${p.fn} will miss around ${p.inj} days with a ${p.injName}.`,null,true); }
     }
     // bans served per matchday: decrement when club plays
-    if (d.slice(8)==='01') monthlyDevelopment();
+    if (d.slice(8)==='01') { monthlyDevelopment(); boardReview(); }
     resolvePending();
+    scoutTick();
     if (windowOpen(d)) { aiTransfers(); incomingBids(); }
-    if (d==='2022-09-02') windowClosedNews();
-    if (d==='2023-02-01') windowClosedNews();
+    for (const w of SEASON.windows) if (d===addDays(w.close,1)) windowClosedNews();
     managerChanges();
     events();
-    if (d==='2022-11-13') { post('wc','🏆 The World Cup in Qatar kicks off on 20 November. The Premier League pauses until Boxing Day.',{big:true}); msg('board','World Cup break','The league is paused until 26 December while the World Cup is played in Qatar. Your internationals are away with their countries.'); }
-    if (d==='2022-12-19' && !S.wcDone){ S.wcDone=true; post('wc','🇦🇷 Argentina are world champions! They beat France on penalties after a 3–3 classic in the final. Messi finally lifts the trophy.',{big:true}); post('wc','🇫🇷 Kylian Mbappé scores a hat-trick in the final and still finishes on the losing side. Golden Boot with 8 goals.',{}); }
+    playerRequests();
+    for (const e of SEASON.events||[]){ if(e.d!==d) continue;
+      for (const [k,t,big] of e.posts||[]) post(k,t,{big:!!big});
+      if (e.msg) msg(e.msg[0],e.msg[1],e.msg[2]);
+    }
+  }
+  // ---------- scouting ----------
+  function scoutTick(){
+    for (const j of S.scoutJobs){ if (j.done || S.date<j.due) continue; j.done=true;
+      if (j.region){
+        const kids=S.ids.map(P).filter(p=>p.c==='EXT'&&p.fr!=='Free agent'&&scouted(p)&&age(p)<=21).sort((a,b)=>b.pot-a.pot).slice(0,3);
+        msg('scout',`First scouting report: ${j.region}`,`Your scouts have finished their first sweep of ${j.region}. ${kids.length?`Young players worth watching: ${kids.map(p=>`${p.fn} (${p.fr}, ${age(p)})`).join(', ')}.`:'Nobody stood out yet.'} Players from this region now show in the Transfers tab.`,{type:'scout',ids:kids.map(p=>p.id)});
+        continue;
+      }
+      const g=j.g, maxAge=j.maxAge||40, cap=S.budget[S.club]*1.5;
+      const pool=S.ids.map(P).filter(p=>p.c!==S.club&&!p.loan&&GROUP[p.p]===g&&age(p)<=maxAge&&askingPrice(p,S.club)<=cap&&!refuses(p,S.club)).sort((a,b)=>b.r-a.r).slice(0,10);
+      const found=[]; while(found.length<4&&pool.length){ found.push(pool.splice(Math.floor(R()*Math.min(pool.length,5)),1)[0]); }
+      found.forEach(p=>{ if(!S.scoutKnown.includes(p.id)) S.scoutKnown.push(p.id); });
+      const what={GK:'goalkeepers',DEF:'defenders',MID:'midfielders',FWD:'forwards'}[g];
+      msg('scout',`Scouting report: ${what}${maxAge<40?` aged ${maxAge} or under`:''}`, found.length?`Your scouts recommend ${found.length} ${what} you could afford: ${found.map(p=>`${p.fn} (${p.c==='EXT'?p.fr:shortName(p.c)}, ${age(p)}, rated ${p.r})`).join('; ')}.`:`Your scouts couldn't find any ${what} within your budget.`,{type:'scout',ids:found.map(p=>p.id)});
+    }
+    S.scoutJobs=S.scoutJobs.filter(j=>!j.done||dayDiff(j.due,S.date)<30);
+  }
+  function scoutAssign(g,maxAge){
+    const active=S.scoutJobs.filter(j=>!j.done&&!j.region).length;
+    if (active>=2) return {ok:false,msg:'Your scouts are already on two assignments. Wait for a report.'};
+    const days=rint(4,9);
+    S.scoutJobs.push({id:++S.msgN,g,maxAge:maxAge||40,due:addDays(S.date,days)});
+    return {ok:true,msg:`Scouts sent out. Report expected in about ${days} days.`};
+  }
+  // ---------- board and player messages ----------
+  function boardReview(){
+    if (!S.table[S.club] || S.table[S.club].p<4 || S.ended) return;
+    const pos=position(S.club), o=S.objective, b=S.board;
+    const tone = pos<=o.pos && b>=55 ? ['Board review: very pleased',`The board are delighted. ${shortName(S.club)} are ${ordinal(pos)}, on course for the target: ${o.label.toLowerCase()}. Keep it up.`]
+      : pos<=(o.ok||o.pos+2) && b>=35 ? ['Board review: steady',`The board are broadly happy. You're ${ordinal(pos)}; the target is to ${o.label.toLowerCase()}. They want to see progress this month.`]
+      : ['Board review: concerned',`The board are worried. ${shortName(S.club)} sit ${ordinal(pos)} and the target is to ${o.label.toLowerCase()}. Results need to improve.`];
+    msg('board',tone[0],tone[1]);
+  }
+  function playerRequests(){
+    const sq=clubPlayers(S.club).filter(p=>!p.loan);
+    if (!sq.length) return;
+    const top16=clubTopRating(S.club,16);
+    // contract talks: a first-teamer whose deal runs out this summer
+    if (S.date>=`${seasonYear()-1}-10-01` && chance(0.02)){
+      const p=pick(sq.filter(x=>x.ce<=seasonYear()&&x.r>=top16&&!x.askedC&&!S.offers.find(o=>o.pid===x.id&&o.kind==='renew')));
+      if (p){ p.askedC=true; msg('contract',`${p.n} wants to talk about a new contract`,`${p.fn}'s contract ends this summer. His agent says he'd like to stay, but other clubs will be able to talk to him soon. He's looking for around £${Math.round(fairWage(p,S.club)*1.1)}k a week.`,{type:'renew',pid:p.id}); }
+    }
+    // transfer request: unhappy for a while
+    for (const p of sq){ if (p.unhappy && !p.tr){ p.unhappyDays=(p.unhappyDays||0)+1; if (p.unhappyDays>=30){ p.tr=true; p.listed=true; msg('squad',`${p.n} hands in a transfer request`,`${p.fn} still isn't getting the game time he wants and has formally asked to leave. He's been added to the transfer list. You can take him off it, but he won't be happy.`,{type:'player',pid:p.id}); post('insider',`🚨 ${p.n} has handed in a transfer request at ${shortName(S.club)}.`,{big:true}); } } }
+    // young player asks to go out on loan
+    if (windowOpen() && chance(0.012)){
+      const games=S.table[S.club].p;
+      const p=pick(sq.filter(x=>age(x)<=21&&x.r<top16&&!x.askedL&&x.mins<=Math.max(90,games*90*0.15)));
+      if (p){ p.askedL=true; msg('squad',`${p.n} asks to go out on loan`,`${p.fn} (${age(p)}) feels he needs regular football to develop and has asked to go out on loan for the rest of the season.`,{type:'loan',pid:p.id}); }
+    }
   }
   function monthlyDevelopment(){
     for (const id of S.ids){ const p=S.players[id]; const a=age(p);
@@ -489,14 +560,14 @@ var ENGINE = (function () {
   function managerChanges(){
     for (const s of REAL_SACKINGS){ if(s.d!==S.date) continue; if(s.c===S.club) continue;
       let go=false; const pos=position(s.c);
-      if (s.cond==='any'||s.cond==='board') go=true; else if (s.cond==='after') go = S.managers.CHE==='Graham Potter'; else go = pos>=8;
+      if (s.cond==='any'||s.cond==='board') go=true; else if (s.cond==='after') go = S.managers[s.afterC]===s.afterMgr; else go = pos>=8;
       if (s.fromC===S.club) go=false;
       if (!go) { if (s.cond==='poor') post('insider',`${s.out} survives at ${shortName(s.c)}. Results have bought him time — history changed.`); continue; }
-      const old=S.managers[s.c]; if(old!==s.out) continue;
-      S.managers[s.c]=s.inn; if (s.fromC) S.managers[s.fromC]=S.managers[s.fromC];
+      const old=S.managers[s.c]; if(old!==s.out && !(s.cond==='after' && old==='(interim)')) continue;
+      S.managers[s.c]=s.inn;
       S.log.mgr.push({d:S.date,c:s.c,out:s.out,inn:s.inn});
       post('club',`${clubName(s.c)} have parted company with ${s.out}. ${s.inn} is the new head coach.`,{club:s.c,big:true});
-      if (s.cond==='board' && s.c==='CHE') { S.managers.BHA = S.club==='BHA'?S.manager:'(interim)'; }
+      if (s.fromC) S.managers[s.fromC] = S.club===s.fromC?S.manager:'(interim)';
     }
   }
   function windowClosedNews(){ post('league','🔒 The transfer window has closed.',{big:true}); }
@@ -594,10 +665,10 @@ var ENGINE = (function () {
   }
   function aiTransfers(){
     // replay real history: external players with a real destination move during their real window
-    const d=S.date; const summer=d<='2022-09-01', jan=d>='2023-01-01'&&d<='2023-01-31';
+    const d=S.date; const w=currentWindow(d);
     for (const id of S.ids){ const p=S.players[id]; if(p.c!=='EXT'||!p.rt||p.rt===S.club) continue;
-      if ((p.rw==='summer'&&summer)||(p.rw==='january'&&jan)){
-        const deadline = summer?'2022-09-01':'2023-01-31'; const left=dayDiff(d,deadline)+1;
+      if (w && p.rw===w.key){
+        const left=dayDiff(d,w.close)+1;
         if (chance(1/Math.max(1,left*0.7))){ const fee=p.fr==='Free agent'?0:Math.round(value(p)*1.1*10)/10; completeTransfer(p,p.rt,fee,fairWage(p,p.rt),4); }
       }
     }
@@ -646,7 +717,7 @@ var ENGINE = (function () {
   function loanOut(pid){
     const p=P(pid); if(age(p)>23) return {ok:false,msg:'Only players aged 23 or under can be loaned out in this version.'};
     if (!windowOpen()) return {ok:false,msg:'The transfer window is closed.'};
-    p.loan={to:pick(['Sunderland','Middlesbrough','Norwich City','Burnley','Coventry City','Swansea City','Blackburn Rovers','Sheffield United','Millwall','Watford','Stoke City','Hull City']),until:'2023-05-31'};
+    p.loan={to:pick(['Sunderland','Middlesbrough','Norwich City','Burnley','Coventry City','Swansea City','Blackburn Rovers','Sheffield United','Millwall','Watford','Stoke City','Hull City']),until:SEASON.loanUntil};
     S.xi=S.xi.map(x=>x===p.id?null:x); S.bench=S.bench.filter(x=>x!==p.id);
     post('club',`🔄 ${p.n} joins ${p.loan.to} on loan until the end of the season.`);
     return {ok:true,msg:`${p.n} goes on loan to ${p.loan.to}.`};
@@ -662,7 +733,12 @@ var ENGINE = (function () {
     else { S.board+=2; S.fans-=2; post('pundit',`Very humble from ${S.manager}. Expectations being managed.`,{big:true}); post('fans','Bit underwhelming that. Show some ambition!'); }
   }
   function doPlan(form,style){ S.formation=form; S.style=style; S.onboard.plan=true; autoPick(); }
-  function doScout(region){ S.scoutRegion=region; S.onboard.scout=true; msg('scout','Scouting network set up',`Your scouts are now covering ${region}. Check the Scout tab for their first report.`); }
+  function doScout(region){
+    S.scoutRegion=region; S.onboard.scout=true;
+    S.scoutJobs=S.scoutJobs.filter(j=>!j.region);
+    const days=rint(4,7); S.scoutJobs.push({id:++S.msgN,region,due:addDays(S.date,days)});
+    msg('scout','Scouting network set up',`Your scouts are now covering ${region}. Their first full report is due in about ${days} days. You can also send them after a particular position from the Scout tab.`,null,false);
+  }
   function doObjectives(){ S.onboard.objectives=true; }
   const REGIONS={'Britain & Ireland':['Premier League','Watford','Burnley','Luton Town','Stoke City','Bristol City','Man City U21'],'Western Europe':['Barcelona','Real Sociedad','Atlético Madrid','Villarreal','Valencia','Real Betis','Paris Saint-Germain','Lyon','Lille','Rennes','Reims','Marseille','Monaco','Nice','Metz','Lorient','Benfica','Sporting CP','Juventus','Roma','Torino','Sassuolo','Atalanta','Sampdoria','Real Madrid'],'Central & Northern Europe':['Ajax','PSV','Feyenoord','Borussia Dortmund','Bayern Munich','Hoffenheim','Stuttgart','Freiburg','Red Bull Salzburg','FC Copenhagen','Molde','AIK','FC Zürich','Genk','Anderlecht','Beşiktaş','Shakhtar Donetsk','Dynamo Kyiv','Dinamo Zagreb'],'South America':['Palmeiras','Corinthians','Flamengo','Vasco da Gama','Racing Club','Rosario Central','Vélez Sarsfield'],'Rest of the world':['Al Sadd','Chicago Fire','Central Coast Mariners','Free agent']};
   function scouted(p){ if(p.c!=='EXT') return true; if(!S.scoutRegion) return false; if(p.fr==='Free agent') return true; return (REGIONS[S.scoutRegion]||[]).includes(p.fr) || S.scoutKnown&&S.scoutKnown.includes(p.id); }
@@ -675,11 +751,11 @@ var ENGINE = (function () {
     S.log.seasons.push({season:S.era,champion:t[0],pos,club:S.club,top:top&&{n:top.fn,g:top.g,c:top.c}});
     const met = pos<=S.objective.pos;
     msg('board', met?'Objective achieved':'Objective missed', met?`You finished ${ordinal(pos)}. The board are delighted.`:`You finished ${ordinal(pos)}. The target was: ${S.objective.label}.`);
-    post('league',`🏆 ${clubName(t[0])} are champions of the 2022/23 Premier League!`,{big:true});
+    post('league',`🏆 ${clubName(t[0])} are champions of the ${SEASON.era} ${SEASON.competition}!`,{big:true});
     post('league',`⬇️ Relegated: ${t.slice(17).map(shortName).join(', ')}.`);
   }
 
-  return { CLUBS, SHORTNAME, FORMATIONS, COORDS, STYLES, GROUP, EXPECT, REGIONS, init, newGame, get S(){return S;}, set S(v){S=v;}, P, clubPlayers, age, ovr, formArrow, value, fairWage, autoPick, validateUserXI, pickXI, compat, slotRating, strength,
+  return { CLUBS, SHORTNAME, FORMATIONS, COORDS, STYLES, GROUP, EXPECT, REGIONS, init, migrate, advanceStep, scoutAssign, get SEASON(){return SEASON;}, newGame, get S(){return S;}, set S(v){S=v;}, P, clubPlayers, age, ovr, formArrow, value, fairWage, autoPick, validateUserXI, pickXI, compat, slotRating, strength,
     simMatch, stepMinute, runToEnd, finalize, aiSubs, aiMentality, makeSub, setupFor, nextUserFixture, advance, afterUserMatchDay, sortedTable, position, windowOpen, windowName, onboardingDone,
     makeBid, offerTerms, weakestGroup, answerBid, renewContract, loanOut, listPlayer, releasePlayer, askingPrice, interest, doCoaches, doMedia, doPlan, doScout, doObjectives, scouted, clubName, shortName, presOf, fmtDate, ordinal, setSeed, seasonYear, addDays, dayDiff, onPitch, slotOf, lambdas, msg, post, endSeason };
 })();

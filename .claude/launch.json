@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "const h=require('http'),f=require('fs'),p=require('path');const root='/Users/tejaspatel/Documents/Claude Games/through-the-eras';h.createServer((q,r)=>{let u=decodeURIComponent(q.url.split('?')[0]);if(u.endsWith('/'))u+='index.html';const fp=p.join(root,p.normalize(u));if(!fp.startsWith(root))return r.writeHead(403).end();f.readFile(fp,(e,d)=>{if(e)return r.writeHead(404).end('not found');r.writeHead(200,{'Content-Type':fp.endsWith('.html')?'text/html; charset=utf-8':fp.endsWith('.json')?'application/json':'application/octet-stream'});r.end(d);});}).listen(8765,'127.0.0.1');"],
+      "port": 8765
+    }
+  ]
+}

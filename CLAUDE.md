@@ -33,12 +33,14 @@ Later: International mode, multi-season careers, more eras.
 - `src/ui.js` — all screens and event handling
 - `src/build.py` — inlines data + engine + ui into `index.html`
 - `data/players.json`, `data/fixtures.json`, `data/real_table.json` — 2022/23 data
+- `data/season.json` — per-season config: start date, transfer windows, dated real-world events (e.g. World Cup break), real manager changes. New eras add their own.
 - `tools/` — the scripts that produced the 2022/23 data, and `test.js` (headless full-season sim)
 
 ## Commands
 
 ```
 python3 src/build.py          # rebuild index.html after any change in src/ or data/
+# play locally: start the "game" server in .claude/launch.json (http://localhost:8765)
 node tools/test.js LIV 1      # simulate a whole season headless (club code, seed)
 ```
 
@@ -57,7 +59,9 @@ Sanity targets for a simulated 2022/23 season: champion on roughly 85–95 point
 
 ## Engine notes
 
-- Game state lives in `ENGINE.S`; saved to `localStorage` key `tte_save_v1` after every match. Bump the key or migrate if the state shape changes, so old saves don't break.
+- Game state lives in `ENGINE.S` (shape version `S.v`, currently 3). Add defaults for new fields in `ENGINE.migrate()` so old saves keep loading.
+- Saves: 15 slots in IndexedDB (`through-the-eras` DB, stores `meta` and `state`; localStorage fallback). A hidden `auto` record is written after every action for crash recovery; a slot only changes when the player saves. The red ✕ (leave without saving) deletes `auto`. The old single `tte_save_v1` save is moved into slot 1 on first load.
+- Time moves day by day: `advanceStep()` stops on any day a message of a stopping kind arrives (`STOP_KINDS` in `msg()`), or on match day. `advance()` ignores stops and is only for the headless sim.
 - `realHistory`, `REAL_SACKINGS` and the external players' `rt`/`rw` fields drive history replaying. Keep this pattern per era.
 - Match engine is Poisson-style per minute; tune via `lambdas()`. Out-of-position players are weighted down via `compat()`.
 - The page must work at phone width (no horizontal scroll) — Mayan plays on mobile too.

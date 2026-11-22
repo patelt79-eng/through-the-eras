@@ -1,0 +1,38 @@
+{
+  "era": "2022/23",
+  "competition": "Premier League",
+  "start": "2022-07-31",
+  "ageRef": "2022-08-05",
+  "loanUntil": "2023-05-31",
+  "nextSummerOpen": "06-10",
+  "windows": [
+    {"key": "summer", "name": "Summer window", "open": "2022-06-01", "close": "2022-09-01", "closeLabel": "closes 1 Sep, 23:00"},
+    {"key": "january", "name": "January window", "open": "2023-01-01", "close": "2023-01-31", "closeLabel": "closes 31 Jan"}
+  ],
+  "handles": {
+    "wc": {"name": "World Cup 2022", "h": "@qatar2022", "kind": "league"}
+  },
+  "events": [
+    {"d": "2022-11-13",
+     "posts": [["wc", "🏆 The World Cup in Qatar kicks off on 20 November. The Premier League pauses until Boxing Day.", true]],
+     "msg": ["board", "World Cup break", "The league is paused until 26 December while the World Cup is played in Qatar. Your internationals are away with their countries."]},
+    {"d": "2022-12-19",
+     "posts": [["wc", "🇦🇷 Argentina are world champions! They beat France on penalties after a 3–3 classic in the final. Messi finally lifts the trophy.", true],
+               ["wc", "🇫🇷 Kylian Mbappé scores a hat-trick in the final and still finishes on the losing side. Golden Boot with 8 goals.", false]]}
+  ],
+  "sackings": [
+    {"d": "2022-08-30", "c": "BOU", "out": "Scott Parker", "inn": "Gary O'Neil", "cond": "any"},
+    {"d": "2022-09-07", "c": "CHE", "out": "Thomas Tuchel", "inn": "Graham Potter", "cond": "board", "fromC": "BHA"},
+    {"d": "2022-09-18", "c": "BHA", "out": "Graham Potter", "inn": "Roberto De Zerbi", "cond": "after", "afterC": "CHE", "afterMgr": "Graham Potter"},
+    {"d": "2022-10-24", "c": "AVL", "out": "Steven Gerrard", "inn": "Unai Emery", "cond": "poor"},
+    {"d": "2022-11-05", "c": "WOL", "out": "Bruno Lage", "inn": "Julen Lopetegui", "cond": "poor"},
+    {"d": "2022-11-07", "c": "SOU", "out": "Ralph Hasenhüttl", "inn": "Nathan Jones", "cond": "poor"},
+    {"d": "2023-01-23", "c": "EVE", "out": "Frank Lampard", "inn": "Sean Dyche", "cond": "poor"},
+    {"d": "2023-02-06", "c": "LEE", "out": "Jesse Marsch", "inn": "Javi Gracia", "cond": "poor"},
+    {"d": "2023-02-12", "c": "SOU", "out": "Nathan Jones", "inn": "Rubén Sellés", "cond": "poor"},
+    {"d": "2023-03-21", "c": "CRY", "out": "Patrick Vieira", "inn": "Roy Hodgson", "cond": "poor"},
+    {"d": "2023-03-26", "c": "TOT", "out": "Antonio Conte", "inn": "Cristian Stellini", "cond": "poor"},
+    {"d": "2023-04-02", "c": "CHE", "out": "Graham Potter", "inn": "Frank Lampard", "cond": "poor"},
+    {"d": "2023-04-10", "c": "LEI", "out": "Brendan Rodgers", "inn": "Dean Smith", "cond": "poor"}
+  ]
+}

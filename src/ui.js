@@ -5,7 +5,12 @@ const E = ENGINE;
 E.init(window.GAME_DATA);
 const $ = s => document.querySelector(s);
 const app = $('#app');
-const SAVE_KEY = 'tte_save_v1';
+const OLD_SAVE_KEY = 'tte_save_v1'; // single save from v1, moved into slot 1 on first load
+const SLOTS = 15;
+let curSlot = null;   // the slot this career saves to
+let metas = {};       // slot number (as string) or 'auto' -> summary shown on the save screens
+let pendingStart = null;
+let afterSave = null;  // 'title' when saving on the way out
 let tab = 'home';
 let live = null; // live match
 let modalStack = [];
@@ -21,27 +26,101 @@ const posOrder = {GK:0,RB:1,CB:2,LB:3,DM:4,CM:5,RM:6,LM:7,AM:8,RW:9,LW:10,ST:11}
 function ratingClass(r){ return r>=85?'r-elite':r>=80?'r-gold':r>=75?'r-silver':r>=70?'r-bronze':'r-low'; }
 function arrow(p){ const a=E.formArrow(p); return a===2?'<span class="ar up2" title="In great form">▲▲</span>':a===1?'<span class="ar up" title="Good form">▲</span>':a===-1?'<span class="ar dn" title="Poor form">▼</span>':a===-2?'<span class="ar dn2" title="Very poor form">▼▼</span>':'<span class="ar">–</span>'; }
 function chip(c, small){ const k=club(c); if(!k) return `<span class="chip ext${small?' sm':''}">${esc(c==='EXT'?'—':c)}</span>`; return `<span class="chip${small?' sm':''}" style="--c1:${k.col};--c2:${k.col2}"><i></i>${c}</span>`; }
-function save(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(S())); }catch(e){} }
-function loadSave(){ try{ const s=localStorage.getItem(SAVE_KEY); if(!s) return null; return JSON.parse(s); }catch(e){ return null; } }
-function hasSave(){ try{ return !!localStorage.getItem(SAVE_KEY); }catch(e){ return false; } }
+// ---------------- SAVES ----------------
+// 15 named slots plus one hidden 'auto' record. The game writes 'auto' after every action so a
+// closed tab or crash loses nothing; a named slot only changes when the player saves.
+// Leaving without saving deletes 'auto', so that progress really is thrown away.
+// IndexedDB holds far more than localStorage (~5 MB, too small for 15 careers); localStorage is the fallback.
+const Store=(()=>{
+  let dbp=null, useLS=!window.indexedDB;
+  function db(){ if(!dbp) dbp=new Promise((res,rej)=>{ const r=indexedDB.open('through-the-eras',1); r.onupgradeneeded=()=>{ r.result.createObjectStore('meta'); r.result.createObjectStore('state'); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); r.onblocked=()=>rej(new Error('blocked')); }); return dbp; }
+  function run(mode,fn){ return db().then(d=>new Promise((res,rej)=>{ const t=d.transaction(['meta','state'],mode); const req=fn(t.objectStore('meta'),t.objectStore('state')); t.oncomplete=()=>res(req?req.result:undefined); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error||new Error('aborted')); })); }
+  async function either(idb,ls){ if(!useLS){ try{ return await idb(); }catch(e){ useLS=true; } } return ls(); }
+  const lsGet=k=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } };
+  return {
+    allMeta:()=>either(()=>run('readonly',m=>m.getAll()), ()=>{ const out=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith('tte_meta_')){ const v=lsGet(k); if(v) out.push(v); } } return out; }),
+    load:k=>either(()=>run('readonly',(m,s)=>s.get(String(k))), ()=>lsGet('tte_state_'+k)),
+    put:(k,meta,state)=>either(()=>run('readwrite',(m,s)=>{ m.put(meta,String(k)); s.put(state,String(k)); }), ()=>{ localStorage.setItem('tte_state_'+k,JSON.stringify(state)); localStorage.setItem('tte_meta_'+k,JSON.stringify(meta)); }),
+    del:k=>either(()=>run('readwrite',(m,s)=>{ m.delete(String(k)); s.delete(String(k)); }), ()=>{ try{ localStorage.removeItem('tte_state_'+k); localStorage.removeItem('tte_meta_'+k); }catch(e){} })
+  };
+})();
+function metaOf(s,key){ const t=s.table[s.club]; return {slot:String(key), club:s.club, manager:s.manager, era:s.era, date:s.date, played:t?t.p:0, pos:t&&t.p?E.position(s.club):null, sacked:!!s.sacked, ended:!!s.ended, savedAt:Date.now(), forSlot:key==='auto'?curSlot:null}; }
+async function refreshMetas(){ metas={}; try{ for(const m of await Store.allMeta()) metas[m.slot]=m; }catch(e){} }
+function firstFreeSlot(){ for(let i=1;i<=SLOTS;i++) if(!metas[i]) return i; return null; }
+function slotsUsed(){ let n=0; for(let i=1;i<=SLOTS;i++) if(metas[i]) n++; return n; }
+function continueTarget(){ if(metas.auto) return metas.auto; let best=null; for(let i=1;i<=SLOTS;i++){ const m=metas[i]; if(m&&(!best||m.savedAt>best.savedAt)) best=m; } return best; }
+function metaLine(m){ return `${E.CLUBS[m.club]?E.CLUBS[m.club].name:m.club} · ${m.manager} · ${m.era} · ${E.fmtDate(m.date)}`; }
+function ago(ts){ const s=(Date.now()-ts)/1000; if(s<60) return 'just now'; if(s<3600) return `${Math.floor(s/60)} min ago`; if(s<86400) return `${Math.floor(s/3600)} h ago`; const d=new Date(ts); return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); }
+let autoT=null;
+function save(){ if(!S()) return; clearTimeout(autoT); autoT=setTimeout(autosaveNow,250); }
+function autosaveNow(){ clearTimeout(autoT); const s=S(); if(!s) return Promise.resolve(); const m=metaOf(s,'auto'); metas.auto=m; return Store.put('auto',m,s).catch(()=>{}); }
+async function saveToSlot(slot){
+  clearTimeout(autoT); const s=S(); if(!s) return false;
+  try{ const m=metaOf(s,slot); await Store.put(slot,m,s); metas[slot]=m; curSlot=slot; await Store.del('auto'); delete metas.auto; return true; }
+  catch(e){ toast("Couldn't save. This device may be out of storage.",1); return false; }
+}
+function doSaveSlot(k){ saveToSlot(k).then(ok=>{ if(!ok) return; const after=afterSave; afterSave=null; if(after==='title'){ E.S=null; curSlot=null; renderTitle(); } else renderHub(); toast(`Saved to slot ${k}`); }); }
+async function leaveWithoutSaving(){ clearTimeout(autoT); try{ await Store.del('auto'); }catch(e){} delete metas.auto; E.S=null; curSlot=null; closeModal(); renderTitle(); }
+async function loadSlot(key){
+  const st=await Store.load(key).catch(()=>null);
+  if(!st){ toast("That save couldn't be opened.",1); return; }
+  E.S=E.migrate(st);
+  curSlot = key==='auto' ? (metas.auto&&metas.auto.forSlot) || firstFreeSlot() || 1 : +key;
+  tab='home'; renderHub();
+  if(key==='auto') toast('Picked up where you left off. Not saved to a slot yet.');
+}
+async function boot(){
+  await refreshMetas();
+  try{ // move the single v1 save into slot 1
+    const old=localStorage.getItem(OLD_SAVE_KEY);
+    if(old && !Object.keys(metas).length){ const s=E.migrate(JSON.parse(old)); E.S=s; curSlot=1; await Store.put(1,metaOf(s,1),s); localStorage.removeItem(OLD_SAVE_KEY); E.S=null; curSlot=null; await refreshMetas(); }
+  }catch(e){ E.S=null; curSlot=null; }
+  renderTitle();
+}
 function toast(t, bad){ const el=document.createElement('div'); el.className='toast'+(bad?' bad':''); el.textContent=t; document.body.appendChild(el); setTimeout(()=>el.classList.add('out'),2600); setTimeout(()=>el.remove(),3100); }
 
 // ---------------- TITLE ----------------
 function renderTitle(){
   document.body.style.setProperty('--club', '#2E6F8E'); document.body.style.setProperty('--club2', '#F2B544');
+  const used=slotsUsed(), cont=continueTarget();
   app.innerHTML = `
   <section class="title">
     <div class="brand"><div class="logo">THROUGH<br>THE ERAS</div><p>Football career mode, any season from 1990. Designed by Mayan.</p></div>
+    ${cont?`<button class="resume" data-act="continueSave" style="--c1:${club(cont.club)?club(cont.club).col:'#556'};--c2:${club(cont.club)?club(cont.club).col2:'#ccd'}"><span class="kit"></span><span class="rt"><span class="rl">Continue</span><span class="rs">${esc(metaLine(cont))}${cont.slot==='auto'?' · <em>unsaved progress</em>':` · slot ${esc(cont.slot)}`}</span></span><span class="ra" aria-hidden="true">▶</span></button>`:''}
     <div class="tiles">
       <button class="tile big" data-act="new"><span class="tl">Career Mode</span><span class="ts">New save</span>${svgPerson()}</button>
       <button class="tile big locked" data-act="intl" aria-disabled="true"><span class="tl">International</span><span class="ts">New save · coming in a later version</span>${svgGlobe()}</button>
       <button class="tile" data-act="challenges"><span class="tl">Objectives</span><span class="ts">Pick a challenge</span>${svgTarget()}</button>
-      <button class="tile" data-act="load" ${hasSave()?'':'aria-disabled="true"'}><span class="tl">Load save</span><span class="ts">${hasSave()?esc(saveSummary()):'No save yet'}</span>${svgFile()}</button>
+      <button class="tile" data-act="load" ${used?'':'aria-disabled="true"'}><span class="tl">Load save</span><span class="ts">${used?`${used} of ${SLOTS} slots used`:'No saves yet'}</span>${svgFile()}</button>
     </div>
-    <p class="fine">Squads, prices and fixtures: official Premier League (Fantasy Premier League) data for 2022/23. Birth dates and shirt numbers cross-checked with Transfermarkt.</p>
+    <p class="fine">Squads, prices and fixtures: official Premier League (Fantasy Premier League) data for 2022/23. Birth dates and shirt numbers cross-checked with Transfermarkt. Saves stay on this device.</p>
   </section>`;
 }
-function saveSummary(){ const s=loadSave(); if(!s) return ''; return `${E.CLUBS[s.club]?E.CLUBS[s.club].name:s.club} · ${s.manager} · ${E.fmtDate(s.date)}`; }
+// mode: 'load' (from the menu), 'save' (from a career), 'new' (all slots full when starting a career)
+function renderSlots(mode){
+  const k=c=>club(c)||{col:'#556',col2:'#ccd',name:c};
+  const rows=[]; for(let i=1;i<=SLOTS;i++){ const m=metas[i]; const cur=S()&&curSlot===i;
+    let btns='';
+    if(mode==='load') btns=m?`<button class="btn primary sm" data-act="loadSlot" data-k="${i}">Load</button><button class="btn danger sm" data-act="delSlotAsk" data-k="${i}" aria-label="Delete slot ${i}">Delete</button>`:'';
+    else if(mode==='save') btns=`<button class="btn ${cur||!m?'primary':''} sm" data-act="saveSlotAsk" data-k="${i}">${cur?'Save':m?'Overwrite':'Save here'}</button>`;
+    else btns=`<button class="btn ${m?'':'primary'} sm" data-act="newSlotAsk" data-k="${i}">${m?'Overwrite':'Use'}</button>`;
+    rows.push(`<li class="slot${m?'':' empty'}${cur?' cur':''}"><span class="sn">${i}</span>${m?`<span class="kit" style="--c1:${k(m.club).col};--c2:${k(m.club).col2}"></span><div class="si"><b>${esc(k(m.club).name)}</b><small>${esc(m.manager)} · ${esc(m.era)} · ${E.fmtDate(m.date)}${m.pos?` · ${E.ordinal(m.pos)} after ${m.played}`:''}${m.sacked?' · sacked':m.ended?' · season over':''}</small><small class="dim">Saved ${ago(m.savedAt)}${cur?' · this career':''}</small></div>`:`<div class="si"><b class="dim">Empty slot</b></div>`}<div class="sa">${btns}</div></li>`);
+  }
+  const title={load:'Load save',save:'Save career',new:'Pick a save slot'}[mode];
+  const lede={load:`${slotsUsed()} of ${SLOTS} slots used. Saves stay in this browser on this device.`,save:'Pick a slot. Saving over another career replaces it.',new:`All ${SLOTS} slots are full. Pick one to replace with your new career.`}[mode];
+  app.innerHTML=`<section class="flow narrow"><button class="back" data-act="${mode==='save'?'backHub':'title'}">◀ Back</button><h1 class="h1">${title}</h1><p class="lede">${lede}</p><ol class="slots">${rows.join('')}</ol></section>`;
+  window.scrollTo(0,0);
+}
+function exitModal(){
+  const m=curSlot&&metas[curSlot];
+  openModal(`<div class="msg exit"><h2>Leave this career?</h2><p class="sub">${m?`Slot ${curSlot} was last saved ${ago(m.savedAt)}.`:'This career hasn\'t been saved yet.'}</p>
+    <div class="exitopts">
+      <button class="xopt nosave" data-act="exitNoSave"><span class="bigx" aria-hidden="true">✕</span><b>Leave without saving</b><span>Anything since your last save is lost.</span></button>
+      <button class="xopt dosave" data-act="exitSave"><span class="paper" aria-hidden="true">${svgPaper()}</span><b>Save &amp; leave</b><span>${curSlot?`Saves to slot ${curSlot}.`:'Pick a slot.'}</span></button>
+    </div>
+    <div class="formrow center"><button class="btn" data-act="closeModal">Keep playing</button><button class="lnk" data-act="saveAs">Save to a different slot</button></div></div>`, 'exitbox', true);
+}
+function svgPaper(){ return `<svg viewBox="0 0 64 76"><path class="pf" d="M8 4h34l14 14v54H8z"/><path class="pc" d="M42 4v14h14"/><path class="pl" d="M17 30h30M17 40h30M17 50h22"/><path class="pt" d="M36 58l6 6 12-14"/></svg>`; }
 function svgPerson(){ return `<svg class="ti" viewBox="0 0 60 80" aria-hidden="true"><circle cx="30" cy="14" r="9"/><path d="M30 24v28M30 52l-13 24M30 52l13 24M8 34l22-6 22 6"/></svg>`; }
 function svgGlobe(){ return `<svg class="ti" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="30"/><path d="M14 30c10 4 18-6 26 0s8 14 22 8M24 60c6-10 14-4 18-14M50 18c-2 8 6 10 4 18"/></svg>`; }
 function svgTarget(){ return `<svg class="ti" viewBox="0 0 80 80" aria-hidden="true"><circle cx="38" cy="44" r="26"/><circle cx="38" cy="44" r="14"/><path d="M38 44L66 14M58 14h8v8"/></svg>`; }
@@ -85,11 +164,17 @@ function renderManager(){
   setTimeout(()=>{ const i=$('#mname'); if(i) i.focus(); },50);
 }
 function startGame(name, real){
+  const free=firstFreeSlot();
+  if(!free){ pendingStart={name,real}; renderSlots('new'); return; }
+  beginCareer(name,real,free);
+}
+function beginCareer(name, real, slot){
   const opt={club:pending.club, manager:name, realMgr:real};
   if (pending.challenge) opt.challenge=pending.challenge;
   E.newGame(opt);
   if (pending.challenge){ const g=pending.challenge.goal; S().objective = {label:g.label, pos: g.pos || E.EXPECT[club(pending.club).exp].pos, type:g.type, c:g.c}; }
-  tab='home'; save(); renderHub();
+  tab='home'; curSlot=slot; pendingStart=null; renderHub();
+  saveToSlot(slot).then(ok=>{ if(ok) toast(`Career saved in slot ${slot}`); });
 }
 
 // ---------------- HUB ----------------
@@ -104,13 +189,14 @@ function renderHub(){
   <header class="hud">
     <div class="hudl"><span class="crest" style="--c1:${k.col};--c2:${k.col2}"></span><div><div class="hc">${esc(k.name)}</div><div class="hm">${esc(s.manager)} · ${E.fmtDate(s.date)}</div></div></div>
     <div class="hudr"><div><span>Budget</span><b>${money(s.budget[s.club])}</b></div><div><span>Wages</span><b>£${wagesNow()}k/${s.wageBudget}k</b></div><div><span>Position</span><b>${s.table[s.club].p?E.ordinal(E.position(s.club)):'–'}</b></div></div>
+    <button class="exitx" data-act="exitAsk" aria-label="Leave this career" title="Leave this career">✕</button>
   </header>
   <nav class="bars" role="tablist"><span class="pad">L1</span>${TABS.map(([id,l])=>`<button role="tab" aria-selected="${tab===id}" class="bar${tab===id?' on':''}" data-act="tab" data-t="${id}">${l}${id==='home'&&unread?`<em>${unread}</em>`:''}</button>`).join('')}<span class="pad">R1</span></nav>
   <main id="view" class="view">${renderTab()}</main>
   <footer class="cont">
-    ${s.sacked?`<div class="nfx">You have been sacked.</div><button class="btn primary" data-act="title">Main menu</button>`:
+    ${s.sacked?`<div class="nfx">You have been sacked.</div><button class="btn primary" data-act="exitAsk">Main menu</button>`:
       s.ended?`<div class="nfx">Season complete · finished ${E.ordinal(E.position(s.club))}</div><button class="btn primary" data-act="tab" data-t="records">See the season ▶</button>`:
-      nf?`<div class="nfx"><span>Next</span> ${nf.h===s.club?'vs':'at'} <b>${esc(E.shortName(nf.h===s.club?nf.a:nf.h))}</b> · ${E.fmtDate(nf.d)} ${nf.t} · MW${nf.gw}</div><button class="btn primary big" data-act="continue" ${E.onboardingDone()?'':'aria-disabled="true"'}>${E.onboardingDone()?'Continue ▶':'Finish checklist first'}</button>`:''}
+      nf?(()=>{ const dd=E.dayDiff(s.date,nf.d); return `<div class="nfx"><span>Next</span> ${nf.h===s.club?'vs':'at'} <b>${esc(E.shortName(nf.h===s.club?nf.a:nf.h))}</b> · ${E.fmtDate(nf.d)} ${nf.t} · ${dd===0?'<b class="today">today</b>':dd===1?'tomorrow':`in ${dd} days`}</div><button class="btn primary big" data-act="continue" ${E.onboardingDone()?'':'aria-disabled="true"'}>${!E.onboardingDone()?'Finish checklist first':dd===0?'Go to match ▶':'Continue ▶'}</button>`; })():''}
   </footer>`;
   bindTabKeys();
 }
@@ -247,6 +333,10 @@ function viewScout(){
   </section>
   <section class="panel"><div class="ph"><h2>Wonderkids spotted</h2></div><p class="sub">Best young players your scouts can see.</p><ul class="plist">${abroadKids.map(p=>row(p,`${p.c==='EXT'?p.fr:E.shortName(p.c)} · age ${E.age(p)} · POT ${p.pot}`)).join('')}</ul>
     <button class="btn" data-act="step" data-k="scout">Change region</button></section>
+  <section class="panel"><div class="ph"><h2>Send your scouts</h2></div><p class="sub">Ask for a report on a position. It takes a few days; the game will stop when it's ready. Up to two at a time.</p>
+    <div class="formrow"><select id="scg" aria-label="Position">${[['GK','Goalkeepers'],['DEF','Defenders'],['MID','Midfielders'],['FWD','Forwards']].map(([v,l])=>`<option value="${v}" ${v===need?'selected':''}>${l}</option>`).join('')}</select><select id="sca" aria-label="Age">${[[40,'Any age'],[29,'29 or under'],[23,'23 or under'],[21,'21 or under']].map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select><button class="btn primary" data-act="scoutSend">Send scouts</button></div>
+    ${(()=>{ const jobs=s.scoutJobs.filter(j=>!j.done); return jobs.length?`<ul class="deals">${jobs.map(j=>`<li><b>${j.region?`First report: ${esc(j.region)}`:esc({GK:'Goalkeepers',DEF:'Defenders',MID:'Midfielders',FWD:'Forwards'}[j.g])+(j.maxAge<40?` · ${j.maxAge} or under`:'')}</b><span class="st">Due ${E.fmtDate(j.due).slice(0,6)}</span></li>`).join('')}</ul>`:'<p class="empty">No scouts out right now.</p>'; })()}
+  </section>
   </div>`;
 }
 
@@ -256,7 +346,7 @@ function viewTable(){
   const scorers=s.ids.map(E.P).filter(p=>p.g>0).sort((a,b)=>b.g-a.g||a.apps-b.apps).slice(0,10);
   const assists=s.ids.map(E.P).filter(p=>p.a>0).sort((a,b)=>b.a-a.a).slice(0,10);
   return `<div class="grid tablev">
-  <section class="panel wide"><div class="ph"><h2>Premier League 2022/23</h2></div><div class="tscroll"><table class="tbl league"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num hide-s">GF</th><th class="num hide-s">GA</th><th class="num">GD</th><th class="num">Pts</th><th class="hide-s">Form</th></tr></thead><tbody>
+  <section class="panel wide"><div class="ph"><h2>${esc(E.SEASON.competition)} ${esc(s.era)}</h2></div><div class="tscroll"><table class="tbl league"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num hide-s">GF</th><th class="num hide-s">GA</th><th class="num">GD</th><th class="num">Pts</th><th class="hide-s">Form</th></tr></thead><tbody>
   ${t.map((c,i)=>{const r=s.table[c];return `<tr class="${c===s.club?'me':''} ${i<4?'ucl':i===4?'uel':i>=17?'rel':''}"><td class="num">${i+1}</td><td>${chip(c,1)} ${esc(E.CLUBS[c].name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num hide-s">${r.gf}</td><td class="num hide-s">${r.ga}</td><td class="num">${r.gf-r.ga>0?'+':''}${r.gf-r.ga}</td><td class="num b">${r.pts}</td><td class="hide-s">${r.form.map(x=>`<span class="fm ${x}">${x}</span>`).join('')}</td></tr>`;}).join('')}</tbody></table></div>
   <p class="sub legend"><span class="lg ucl"></span>Champions League <span class="lg uel"></span>Europa League <span class="lg rel"></span>Relegation</p></section>
   <section class="panel"><div class="ph"><h2>Top scorers</h2></div><ol class="lb">${scorers.map(p=>`<li><button data-act="player" data-id="${p.id}"><b>${esc(p.n)}</b>${chip(p.c,1)}<span class="num">${p.g}</span></button></li>`).join('')||'<li class="empty">No goals yet.</li>'}</ol>
@@ -264,7 +354,7 @@ function viewTable(){
   </div>`;
 }
 // NEWS
-function viewNews(){ return `<section class="panel feedpanel"><div class="ph"><h2>Feed</h2><span class="sub">2022/23 · social media era</span></div>${feed(S().news.slice(0,80))}</section>`; }
+function viewNews(){ return `<section class="panel feedpanel"><div class="ph"><h2>Feed</h2><span class="sub">${esc(S().era)} · social media era</span></div>${feed(S().news.slice(0,80))}</section>`; }
 // RECORDS
 function viewRecords(){
   const s=S(); const real=s.realHistory; const t=E.sortedTable();
@@ -284,15 +374,15 @@ function viewSettings(){
   return `<div class="grid set">
   <section class="panel"><div class="ph"><h2>Game</h2></div>
     <div class="formrow"><span class="sub">Match speed</span>${[[1,'Slow'],[2,'Normal'],[4,'Fast']].map(([v,l])=>`<button class="seg${s.matchSpeed==v?' on':''}" data-act="speed" data-v="${v}">${l}</button>`).join('')}</div>
-    <div class="formrow"><button class="btn" data-act="saveNow">Save now</button><button class="btn" data-act="title">Main menu</button><button class="btn danger" data-act="resetAsk">Delete save</button></div>
-    <p class="sub">The game saves automatically in this browser after every match. A save lives on this device only.</p></section>
+    <div class="formrow"><button class="btn primary" data-act="saveNow">Save to slot ${curSlot||'–'}</button><button class="btn" data-act="saveAsHub">Save to another slot</button><button class="btn" data-act="exitAsk">Leave career</button></div>
+    <p class="sub">Your career is kept in slot ${curSlot||'–'} of ${SLOTS}${curSlot&&metas[curSlot]?`, last saved ${ago(metas[curSlot].savedAt)}`:''}. The game also keeps a backup as you play, so closing the browser by accident won't lose anything. Leaving with the red ✕ throws away everything since your last save. Saves live on this device only. Delete old saves from Load save on the main menu.</p></section>
   <section class="panel"><div class="ph"><h2>Where the data comes from</h2></div>
     <ul class="notes"><li><b>Squads, positions groups, prices, fixtures and real results:</b> official Premier League Fantasy data for 2022/23, squads as of Matchweek 1.</li><li><b>Birth dates, shirt numbers and exact positions:</b> Transfermarkt 2022/23 squad pages. 401 birth dates appear in both sources and all of them match.</li><li><b>Ratings:</b> worked out from each player's official FPL starting price, his 2021/22 minutes, bonus-points per 90 and his club's strength, then a scout check of about 230 players where FPL prices misjudge real quality (for example defensive midfielders). Mayan has the final say.</li><li><b>Estimates:</b> wages, contract lengths, transfer budgets and potential are estimates.</li><li><b>Signed later in real life:</b> players who joined Premier League clubs after the opening weekend start at their old club and move on their real dates unless you get there first.</li></ul></section>
   </div>`;
 }
 
 // ---------------- MODALS ----------------
-function openModal(html, cls){ closeModal(); const w=document.createElement('div'); w.className='modal'; w.innerHTML=`<div class="mbox ${cls||''}" role="dialog" aria-modal="true"><button class="x" data-act="closeModal" aria-label="Close">✕</button>${html}</div>`; document.body.appendChild(w); const f=w.querySelector('input,button.btn'); if(f) setTimeout(()=>f.focus(),30); }
+function openModal(html, cls, noX){ closeModal(); const w=document.createElement('div'); w.className='modal'; w.innerHTML=`<div class="mbox ${cls||''}" role="dialog" aria-modal="true">${noX?'':'<button class="x" data-act="closeModal" aria-label="Close">✕</button>'}${html}</div>`; document.body.appendChild(w); const f=w.querySelector('input,button.btn'); if(f) setTimeout(()=>f.focus(),30); }
 function closeModal(){ document.querySelectorAll('.modal').forEach(m=>m.remove()); }
 
 function playerModal(id){
@@ -320,6 +410,10 @@ function msgModal(id){
   const s=S(); const m=s.inbox.find(x=>x.id===id); if(!m) return; m.read=true;
   let act='';
   if(m.action&&m.action.type==='bid'&&!m.done){ const p=E.P(m.action.pid); act=`<div class="formrow"><button class="btn primary" data-act="bidAccept" data-id="${id}">Accept £${m.action.fee}m</button><button class="btn" data-act="bidReject" data-id="${id}">Reject</button></div><div class="formrow"><input id="counter" type="number" step="0.5" value="${Math.round(m.action.fee*1.25*2)/2}"><button class="btn" data-act="bidCounter" data-id="${id}">Counter-offer</button></div><button class="lnk" data-act="player" data-id="${p.id}">View ${esc(p.n)}</button>`; }
+  else if(m.action&&m.action.type==='scout'){ const ps=(m.action.ids||[]).map(E.P).filter(Boolean); if(ps.length) act=`<ul class="plist">${ps.map(p=>`<li><button data-act="player" data-id="${p.id}"><span class="pos p-${E.GROUP[p.p]}">${p.p}</span><b>${esc(p.fn)}</b><span class="dim">${esc(p.c==='EXT'?p.fr:E.shortName(p.c))} · ${E.age(p)}</span><span class="ovr ${ratingClass(E.ovr(p))}">${E.ovr(p)}</span></button></li>`).join('')}</ul>`; }
+  else if(m.action&&m.action.type==='renew'&&!m.done){ act=`<div class="formrow"><button class="btn primary" data-act="msgRenew" data-id="${id}">Offer new contract</button><button class="btn" data-act="player" data-id="${m.action.pid}">View player</button></div>`; }
+  else if(m.action&&m.action.type==='loan'&&!m.done){ act=`<div class="formrow"><button class="btn primary" data-act="msgLoan" data-id="${id}">Loan him out</button><button class="btn" data-act="msgKeep" data-id="${id}">Keep him</button><button class="lnk" data-act="player" data-id="${m.action.pid}">View player</button></div>`; }
+  else if(m.action&&m.action.type==='player'){ act=`<div class="formrow"><button class="btn" data-act="player" data-id="${m.action.pid}">View player</button></div>`; }
   openModal(`<div class="msg"><p class="md">${E.fmtDate(m.d)}</p><h2>${esc(m.title)}</h2><p>${esc(m.body)}</p>${act}<div id="mres" class="mres" aria-live="polite"></div></div>`);
   save();
 }
@@ -353,11 +447,23 @@ function stepModal(k){
 }
 
 // ---------------- MATCH ----------------
+// Continue: move the calendar on a day at a time, stopping whenever something needs the manager
+// (bids, replies, scouting reports, board and player messages), and only then going to the match.
+function continueDays(){
+  const s=S(); const st=E.advanceStep();
+  if(st.r==='blocked'){ toast('Finish your pre-season checklist first.',1); return; }
+  if(st.r==='end'||st.r==='sacked'){ save(); renderHub(); return; }
+  if(st.r==='event'){
+    save(); renderHub();
+    const msgs=st.stops.map(id=>s.inbox.find(m=>m.id===id)).filter(Boolean);
+    toast(`${st.days===1?'Next day':st.days+' days later'} · ${E.fmtDate(s.date)}${msgs.length>1?` · ${msgs.length} new messages`:''}`);
+    if(msgs[0]){ msgModal(msgs[0].id); rerenderBehind(); }
+    return;
+  }
+  startMatchDay();
+}
 function startMatchDay(){
-  const s=S(); const r=E.advance();
-  if(r==='blocked'){ toast('Finish your pre-season checklist first.',1); return; }
-  if(r==='end'||r==='sacked'){ save(); renderHub(); return; }
-  if(s.autoXI!==false) E.autoPick(); else E.validateUserXI();
+  const s=S();
   const f=E.nextUserFixture();
   const m=E.simMatch(f,E.setupFor(f));
   m.added=2+Math.floor(Math.random()*6);
@@ -452,14 +558,30 @@ document.addEventListener('click', e=>{
     case 'intl': toast('International mode is planned for a later version.'); break;
     case 'challenges': renderChallenges(); break;
     case 'pickChallenge': { const c=CHALLENGES.find(x=>x.id===t.dataset.id); pending={club:c.club,challenge:c}; renderManager(); break; }
-    case 'load': { const sv=loadSave(); if(sv){ E.S=sv; tab='home'; renderHub(); } break; }
+    case 'load': refreshMetas().then(()=>renderSlots('load')); break;
     case 'eras': renderEras(); break;
     case 'era22': renderClubs(); break;
     case 'pickClub': pending.club=t.dataset.c; renderManager(); break;
     case 'startNew': { const n=($('#mname').value||'').trim(); if(!n){ toast('Type your manager name first.',1); $('#mname').focus(); return; } startGame(n,false); break; }
     case 'startReal': startGame(club(pending.club).mgr,true); break;
     case 'tab': tab=t.dataset.t; closeModal(); renderHub(); window.scrollTo(0,0); break;
-    case 'continue': if(!E.onboardingDone()){ toast('Finish the pre-season checklist first.',1); tab='home'; renderHub(); return; } startMatchDay(); break;
+    case 'continue': if(!E.onboardingDone()){ toast('Finish the pre-season checklist first.',1); tab='home'; renderHub(); return; } continueDays(); break;
+    case 'continueSave': { const c=continueTarget(); if(c) loadSlot(c.slot); break; }
+    case 'loadSlot': loadSlot(t.dataset.k); break;
+    case 'delSlotAsk': { const k=t.dataset.k, m=metas[k]; openModal(`<div class="msg"><h2>Delete slot ${k}?</h2><p>${esc(metaLine(m))}</p><p class="sub">This can't be undone.</p><div class="formrow"><button class="btn danger" data-act="delSlot" data-k="${k}">Delete save</button><button class="btn" data-act="closeModal">Keep it</button></div></div>`); break; }
+    case 'delSlot': { const k=t.dataset.k; Store.del(k).then(async()=>{ delete metas[k]; if(metas.auto&&String(metas.auto.forSlot)===String(k)){ await Store.del('auto'); delete metas.auto; } closeModal(); renderSlots('load'); toast('Save deleted'); }); break; }
+    case 'exitAsk': if(live){ return; } exitModal(); break;
+    case 'exitNoSave': leaveWithoutSaving(); break;
+    case 'exitSave': { if(!curSlot){ closeModal(); renderSlots('save'); afterSave='title'; break; } saveToSlot(curSlot).then(ok=>{ if(!ok) return; E.S=null; curSlot=null; closeModal(); renderTitle(); toast('Career saved'); }); break; }
+    case 'saveAs': closeModal(); afterSave='title'; renderSlots('save'); break;
+    case 'saveSlotAsk': { const k=+t.dataset.k, m=metas[k]; if(m && k!==curSlot){ openModal(`<div class="msg"><h2>Overwrite slot ${k}?</h2><p>${esc(metaLine(m))}</p><p class="sub">That career will be replaced by this one.</p><div class="formrow"><button class="btn danger" data-act="saveSlot" data-k="${k}">Overwrite</button><button class="btn" data-act="closeModal">Cancel</button></div></div>`); } else doSaveSlot(k); break; }
+    case 'saveSlot': closeModal(); doSaveSlot(+t.dataset.k); break;
+    case 'newSlotAsk': { const k=+t.dataset.k, m=metas[k]; if(m){ openModal(`<div class="msg"><h2>Replace slot ${k}?</h2><p>${esc(metaLine(m))}</p><p class="sub">That career will be deleted to make room.</p><div class="formrow"><button class="btn danger" data-act="newSlot" data-k="${k}">Replace it</button><button class="btn" data-act="closeModal">Cancel</button></div></div>`); } else if(pendingStart) beginCareer(pendingStart.name,pendingStart.real,k); break; }
+    case 'newSlot': closeModal(); if(pendingStart) beginCareer(pendingStart.name,pendingStart.real,+t.dataset.k); break;
+    case 'scoutSend': { const r=E.scoutAssign($('#scg').value, +$('#sca').value); toast(r.msg,!r.ok); if(r.ok){ save(); renderHub(); } break; }
+    case 'msgRenew': { const m=s.inbox.find(x=>x.id===+t.dataset.id); if(m){ m.done=true; renewModal(m.action.pid); } break; }
+    case 'msgLoan': { const m=s.inbox.find(x=>x.id===+t.dataset.id); if(!m) break; const r=E.loanOut(m.action.pid); res(r); if(r.ok){ m.done=true; save(); setTimeout(()=>{closeModal();renderHub();},900);} break; }
+    case 'msgKeep': { const m=s.inbox.find(x=>x.id===+t.dataset.id); if(!m) break; m.done=true; const p=E.P(m.action.pid); p.morale=Math.max(0,p.morale-8); save(); closeModal(); renderHub(); toast(`${p.n} stays. He's a bit disappointed.`); break; }
     case 'step': stepModal(t.dataset.k); break;
     case 'saveCoaches': { const v=[...document.querySelectorAll('input[name=coach]:checked')].map(x=>x.value); if(v.length!==2){ res({ok:false,msg:'Pick exactly two coaches.'}); return; } E.doCoaches(v); closeModal(); save(); renderHub(); toast('Coaches hired'); break; }
     case 'media': E.doMedia(t.dataset.v); closeModal(); save(); renderHub(); toast('Press conference done'); break;
@@ -491,9 +613,8 @@ document.addEventListener('click', e=>{
     case 'bidReject': { const r=E.answerBid(+t.dataset.id,false); res(r); save(); setTimeout(()=>{closeModal();renderHub();},700); break; }
     case 'bidCounter': { const r=E.answerBid(+t.dataset.id,false,parseFloat($('#counter').value)); res(r); save(); setTimeout(()=>{closeModal();renderHub();},1100); break; }
     case 'speed': s.matchSpeed=+t.dataset.v; save(); renderHub(); break;
-    case 'saveNow': save(); toast('Game saved'); break;
-    case 'resetAsk': openModal(`<div class="msg"><h2>Delete your save?</h2><p>This can't be undone.</p><div class="formrow"><button class="btn danger" data-act="reset">Delete save</button><button class="btn" data-act="closeModal">Keep it</button></div></div>`); break;
-    case 'reset': try{localStorage.removeItem(SAVE_KEY);}catch(e){} closeModal(); E.S=null; renderTitle(); toast('Save deleted'); break;
+    case 'saveNow': saveToSlot(curSlot||firstFreeSlot()||1).then(ok=>{ if(ok){ toast(`Saved to slot ${curSlot}`); renderHub(); } }); break;
+    case 'saveAsHub': afterSave=null; renderSlots('save'); break;
     // match
     case 'toTactics': tab='tactics'; live=null; renderHub(); toast('Pick your team, then press Continue to come back to the match.'); break;
     case 'kickoff': playLive(); break;
@@ -506,7 +627,7 @@ document.addEventListener('click', e=>{
     case 'subOff': subPick.off=+t.dataset.id; t.classList.add('sel'); tryDoSub(); break;
     case 'subOn': subPick.on=+t.dataset.id; t.classList.add('sel'); tryDoSub(); break;
     case 'fullTime': fullTime(); break;
-    case 'backHub': tab='home'; renderHub(); break;
+    case 'backHub': afterSave=null; tab='home'; renderHub(); break;
   }
 });
 function rerenderBehind(){ const v=$('#view'); if(v && tab==='home'){ v.innerHTML=renderTab(); } }
@@ -532,7 +653,7 @@ document.addEventListener('keydown', e=>{
 
 // boot
 const hot = window.claude && window.claude.hot;
-if (hot && hot.snapshot) hot.snapshot(()=>({save:S(), tab}));
-function start(data){ if(data&&data.save){ E.S=data.save; tab=data.tab||'home'; renderHub(); } else renderTitle(); }
+if (hot && hot.snapshot) hot.snapshot(()=>({save:S(), tab, slot:curSlot}));
+function start(data){ if(data&&data.save){ E.S=E.migrate(data.save); tab=data.tab||'home'; curSlot=data.slot||null; refreshMetas().then(renderHub); } else boot(); }
 if (hot && hot.ready) hot.ready(start); else start((hot&&hot.data)||{});
 })();
